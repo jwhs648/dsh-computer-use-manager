@@ -1,0 +1,13 @@
+node_modules/
+verification/harness.bundle.js
+verification/screenshots/
+verification/*-result.json
+verification/*-report.json
+dist/
+*.tgz
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db

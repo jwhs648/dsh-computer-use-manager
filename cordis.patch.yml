@@ -1,0 +1,9 @@
+- insert:
+    - id: computer-use-manager
+      name: '@local/dsh-computer-use-manager'
+    - id: computer-use
+      name: '@deepseek-ai/dsh-computer-use'
+      disabled: true
+    - id: computer-use-cua-driver-native
+      name: '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native'
+      disabled: true

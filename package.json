@@ -1,0 +1,61 @@
+{
+  "name": "@local/dsh-computer-use-manager",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Computer-use capability manager for DeepSeek Harness: guided activation, matching component installation and read-only health checks.",
+  "engines": {
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-app-boot": ">=0.2.2-rc.1 <0.3.0",
+    "@deepseek-ai/dsh-plugin-manager": ">=0.2.2-rc.1 <0.3.0",
+    "@deepseek-ai/dsh-atomic-write": ">=0.2.2-rc.1 <0.3.0"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "core.js",
+    "api.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "README.md",
+    "LICENSE",
+    "docs/",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "test": "node --test core.test.js api.test.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "homepage": "https://github.com/jwhs648/dsh-computer-use-manager#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jwhs648/dsh-computer-use-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jwhs648/dsh-computer-use-manager/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "computer-use",
+    "dsh-plugin",
+    "windows",
+    "cua-driver"
+  ]
+}
