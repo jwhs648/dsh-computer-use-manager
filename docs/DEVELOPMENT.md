@@ -1,8 +1,13 @@
 # Developer notes
 
-A local DSH bundle for the Windows native Cua Driver provider. The manager
-remains available independently of the optional driver. Version 0.1.0-alpha.2
-is a safety-fix prerelease for the verified DSH 0.2.2-rc.1 host.
+An activation and management bundle for DSH's existing computer-use capability.
+It does not implement or ship a separate computer-control engine: actual desktop
+operations come from DSH's official computer-use components and their Cua Driver
+Native provider. Missing optional components are installed only after user
+confirmation, at versions matching the running DSH host.
+
+The manager remains available independently of the optional driver. Version
+0.1.0-alpha.2 is a safety-fix prerelease for the verified DSH 0.2.2-rc.1 host.
 
 ## Integration
 
