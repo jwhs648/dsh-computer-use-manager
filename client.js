@@ -2,8 +2,84 @@ window.__ModuleLoader__.load({
   id: '@local/dsh-computer-use-manager',
   factory(require) {
     const React = require('react');
-    const UI = require('@deepseek-ai/dsh-client-ui-primitives');
     const h = React.createElement;
+    // Lucide icon geometry is ISC licensed; see THIRD_PARTY_NOTICES.
+    const paths = {
+      refresh: [['path', { d: 'M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8' }], ['path', { d: 'M21 3v5h-5' }], ['path', { d: 'M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16' }], ['path', { d: 'M8 16H3v5' }]],
+      download: [['path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }], ['polyline', { points: '7 10 12 15 17 10' }], ['line', { x1: 12, x2: 12, y1: 15, y2: 3 }]],
+      check: [['circle', { cx: 12, cy: 12, r: 10 }], ['path', { d: 'm9 12 2 2 4-4' }]],
+      warning: [['path', { d: 'm21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3' }], ['path', { d: 'M12 9v4' }], ['path', { d: 'M12 17h.01' }]],
+      close: [['path', { d: 'M18 6 6 18' }], ['path', { d: 'm6 6 12 12' }]],
+      monitor: [['rect', { width: 20, height: 14, x: 2, y: 3, rx: 2 }], ['line', { x1: 8, x2: 16, y1: 21, y2: 21 }], ['line', { x1: 12, x2: 12, y1: 17, y2: 21 }]],
+    };
+    function Icon({ name, size = 14, ...props }) {
+      return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: false, ...props },
+        paths[name].map(([tag, attributes], key) => h(tag, { ...attributes, key })));
+    }
+    const icon = name => props => h(Icon, { ...props, name });
+    function Button({ icon: leading, children, variant = 'outline', size, className = '', ...props }) {
+      return h('button', { type: 'button', ...props, className: 'cum-button ' + className, 'data-variant': variant }, leading, children);
+    }
+    function Switch({ checked, disabled, label, onChange }) {
+      return h('button', { type: 'button', className: 'cum-switch', role: 'switch', 'aria-checked': checked, 'aria-label': label, disabled, onClick: () => onChange(!checked) }, h('span', { 'aria-hidden': true }));
+    }
+    function Tooltip({ children, label }) {
+      const id = React.useId();
+      const [open, setOpen] = React.useState(false);
+      const timer = React.useRef(null);
+      const hide = () => { clearTimeout(timer.current); setOpen(false); };
+      React.useEffect(() => () => clearTimeout(timer.current), []);
+      return h('span', { className: 'cum-tooltip-anchor', onMouseEnter: () => { timer.current = setTimeout(() => setOpen(true), 400); }, onMouseLeave: hide, onFocus: () => { clearTimeout(timer.current); setOpen(true); }, onBlur: hide, onKeyDown: event => { if (event.key === 'Escape') hide(); } },
+        React.cloneElement(children, { 'aria-describedby': open ? id : undefined }),
+        open ? h('span', { className: 'cum-tooltip', id, role: 'tooltip' }, label) : null);
+    }
+    function Modal({ title, children, footer, onClose, closeLabel, returnFocus, className = '' }) {
+      const dialog = React.useRef(null);
+      const close = React.useRef(onClose);
+      close.current = onClose;
+      const titleId = React.useId();
+      const descriptionId = React.useId();
+      React.useLayoutEffect(() => {
+        const previous = returnFocus || document.activeElement;
+        const page = dialog.current.closest('.cum-page');
+        const bodyOverflow = document.body.style.overflow;
+        const pageOverflow = page.style.overflow;
+        document.body.style.overflow = 'hidden';
+        page.style.overflow = 'hidden';
+        const focusable = () => [...dialog.current.querySelectorAll('button:not(:disabled),[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])')].filter(element => element.getClientRects().length);
+        const initial = () => dialog.current.querySelector('[data-modal-autofocus]') || focusable()[0] || dialog.current;
+        initial().focus({ preventScroll: true });
+        const keyboard = event => {
+          if (event.key === 'Escape' && !event.isComposing) { event.preventDefault(); event.stopPropagation(); close.current(); }
+          if (event.key !== 'Tab') return;
+          const items = focusable();
+          const first = items[0] || dialog.current;
+          const last = items.at(-1) || dialog.current;
+          if (!dialog.current.contains(document.activeElement) || (!event.shiftKey && document.activeElement === last) || (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current))) {
+            event.preventDefault();
+            (event.shiftKey ? last : first).focus();
+          }
+        };
+        const focus = event => { if (dialog.current && !dialog.current.contains(event.target)) initial().focus({ preventScroll: true }); };
+        document.addEventListener('keydown', keyboard, true);
+        document.addEventListener('focusin', focus, true);
+        return () => {
+          document.removeEventListener('keydown', keyboard, true);
+          document.removeEventListener('focusin', focus, true);
+          document.body.style.overflow = bodyOverflow;
+          page.style.overflow = pageOverflow;
+          queueMicrotask(() => { if (previous?.isConnected && !previous.disabled) previous.focus({ preventScroll: true }); });
+        };
+      }, []);
+      return h('div', { className: 'cum-backdrop', onClick: event => { if (event.target === event.currentTarget) close.current(); } },
+        h('div', { ref: dialog, className: 'cum-modal ' + className, role: 'dialog', 'aria-modal': true, 'aria-labelledby': titleId, 'aria-describedby': descriptionId, tabIndex: -1 },
+          h('header', { className: 'cum-modal-header' }, h('h2', { id: titleId }, title), h(Button, { className: 'cum-modal-close', 'aria-label': closeLabel, 'data-dialog-close': true, onClick: () => close.current(), icon: h(Icon, { name: 'close', size: 16 }) })),
+          h('div', { id: descriptionId }, children), h('footer', { className: 'cum-modal-footer' }, footer)));
+    }
+    const UI = { Button, Switch, Tooltip, Modal,
+      StateDot: ({ state }) => h('span', { className: 'cum-dot', 'data-state': state, 'aria-hidden': true }),
+      IconRefreshOutlineRegular: icon('refresh'), IconDownloadOutlineRegular: icon('download'), IconCheckCircleFillRegular: icon('check'), IconWarningOutlineRegular: icon('warning'), IconPluginPinwheelOutlineRegular: icon('monitor'),
+    };
     const NS = 'computerUseManager';
     const PANEL = 'computer-use-manager';
     const DICTS = {
@@ -61,6 +137,13 @@ window.__ModuleLoader__.load({
       },
     };
     const CSS = `
+.cum-button{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:32px;min-width:32px;max-width:100%;padding:5px 11px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;text-align:center;overflow-wrap:anywhere;cursor:pointer;flex-shrink:0}
+.cum-button>svg{flex:none}.cum-button:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2)}.cum-button[data-variant=primary]{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-base)}.cum-button[data-variant=primary]:hover:not(:disabled){background:var(--dsw-alias-brand-primary)}.cum-button:disabled,.cum-switch:disabled{opacity:.5;cursor:default}.cum-button:focus-visible,.cum-switch:focus-visible,.cum-table-wrap:focus-visible,.cum-log summary:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:3px}
+.cum-switch{appearance:none;display:block;width:36px;height:20px;flex:none;padding:2px;border:0;border-radius:10px;background:var(--dsw-alias-state-idle-primary);cursor:pointer}.cum-switch>span{display:block;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-bg-base);transition:transform .12s}.cum-switch[aria-checked=true]{background:var(--dsw-alias-brand-primary)}.cum-switch[aria-checked=true]>span{transform:translateX(16px)}
+.cum-dot{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;flex:none}.cum-dot:before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}.cum-dot[data-state=ongoing]:before{width:10px;height:10px;background:none;border:1.5px solid var(--dsw-alias-border-l1);border-top-color:var(--dsw-alias-brand-primary);animation:cum-spin .8s linear infinite}@keyframes cum-spin{to{transform:rotate(360deg)}}
+.cum-tooltip-anchor{position:relative;display:inline-flex;flex:none}.cum-tooltip{position:absolute;right:0;top:calc(100% + 7px);z-index:20;width:max-content;max-width:min(240px,calc(100vw - 32px));padding:5px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:4px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-size:12px;line-height:18px;overflow-wrap:anywhere;pointer-events:none}
+.cum-backdrop{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:var(--dsw-alias-bg-overlay);overscroll-behavior:contain}.cum-modal{padding:22px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);outline:none}.cum-modal-header{display:flex;align-items:flex-start;gap:12px;justify-content:space-between;margin-bottom:14px}.cum-modal-header h2{font-size:17px;line-height:24px;font-weight:600;margin:0;min-width:0}.cum-modal-close{width:28px;min-width:28px;min-height:28px;height:28px;padding:0;border:0;flex:none}.cum-modal-footer{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:22px}.cum-modal-footer .cum-button{flex-shrink:1;min-width:60px}
+@media(prefers-reduced-motion:reduce){.cum-switch>span{transition:none}.cum-dot[data-state=ongoing]:before{animation:none}}
 .cum-page{height:100%;min-width:0;min-height:0;overflow:auto;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:1.55;letter-spacing:0;box-sizing:border-box}
 .cum-page *{box-sizing:border-box;letter-spacing:0}
 .cum-inner{width:100%;max-width:1120px;margin:0 auto;padding:28px 32px 40px}
@@ -68,11 +151,11 @@ window.__ModuleLoader__.load({
 .cum-header h1{margin:0;font-size:22px;line-height:30px;font-weight:600}.cum-subtle{color:var(--dsw-alias-label-secondary);font-size:12px}.cum-header-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:7px;min-height:20px}
 .cum-section{padding:22px 0;border-bottom:1px solid var(--dsw-alias-border-l2)}
 .cum-section-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px}.cum-section h2{margin:0;font-size:15px;font-weight:600;line-height:24px}.cum-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
-.cum-service-row{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}.cum-status{display:inline-flex;align-items:center;gap:7px;min-width:0;font-size:13px}.cum-status>span:last-child{overflow-wrap:anywhere}.cum-status[data-tone=success]{color:var(--dsw-alias-state-success-primary,#16845b)}.cum-status[data-tone=error]{color:var(--dsw-alias-state-error-primary,#c83943)}.cum-status[data-tone=warn]{color:var(--dsw-alias-state-warn-primary,#9d6b11)}.cum-status[data-tone=idle]{color:var(--dsw-alias-label-secondary)}
-.cum-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 24px;margin:0}.cum-facts div{min-width:0}.cum-facts dt{margin:0 0 5px;color:var(--dsw-alias-label-secondary);font-size:12px}.cum-facts dd{margin:0;overflow-wrap:anywhere;font-size:13px}.cum-code{font-family:var(--ds-font-family-code,monospace);font-size:12px;overflow-wrap:anywhere}
-.cum-note{display:flex;align-items:flex-start;gap:8px;margin-top:14px;overflow-wrap:anywhere}.cum-note>svg{flex:none;margin-top:3px}.cum-note[data-tone=error]{color:var(--dsw-alias-state-error-primary,#c83943)}.cum-note[data-tone=warn]{color:var(--dsw-alias-state-warn-primary,#9d6b11)}.cum-note p{margin:0}.cum-notice{padding:12px 0;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid var(--dsw-alias-border-l2)}
+.cum-service-row{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}.cum-status{display:inline-flex;align-items:center;gap:7px;min-width:0;font-size:13px}.cum-status>span:last-child{overflow-wrap:anywhere}.cum-status[data-tone=success]{color:var(--dsw-alias-state-success-primary)}.cum-status[data-tone=error]{color:var(--dsw-alias-state-error-primary)}.cum-status[data-tone=warn]{color:var(--dsw-alias-state-warn-primary)}.cum-status[data-tone=idle]{color:var(--dsw-alias-label-secondary)}
+.cum-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 24px;margin:0}.cum-facts div{min-width:0}.cum-facts dt{margin:0 0 5px;color:var(--dsw-alias-label-secondary);font-size:12px}.cum-facts dd{margin:0;overflow-wrap:anywhere;font-size:13px}.cum-code{font-family:monospace;font-size:12px;overflow-wrap:anywhere}
+.cum-note{display:flex;align-items:flex-start;gap:8px;margin-top:14px;overflow-wrap:anywhere}.cum-note>svg{flex:none;margin-top:3px}.cum-note[data-tone=error]{color:var(--dsw-alias-state-error-primary)}.cum-note[data-tone=warn]{color:var(--dsw-alias-state-warn-primary)}.cum-note p{margin:0}.cum-notice{padding:12px 0;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid var(--dsw-alias-border-l2)}
 .cum-table-wrap{max-width:100%;overflow:auto}.cum-table{width:100%;border-collapse:collapse;table-layout:fixed;text-align:left}.cum-table th{padding:9px 12px 9px 0;border-bottom:1px solid var(--dsw-alias-border-l2);font-size:12px;font-weight:400;color:var(--dsw-alias-label-secondary)}.cum-table td{vertical-align:top;padding:12px 12px 12px 0;border-bottom:1px solid var(--dsw-alias-border-l2);overflow-wrap:anywhere}.cum-table th:last-child,.cum-table td:last-child{padding-right:0}.cum-table tbody tr:last-child td{border-bottom:0}.cum-package-name{font-weight:500;margin-bottom:3px}.cum-table .cum-status{font-size:12px}.cum-packages th:first-child{width:43%}.cum-packages th:not(:first-child){width:19%}.cum-health th:first-child{width:27%}.cum-health th:nth-child(2){width:15%}.cum-history th:first-child{width:23%}.cum-history th:nth-child(2){width:18%}.cum-history th:nth-child(3){width:17%}
-.cum-inline-facts{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px;margin:0 0 14px;color:var(--dsw-alias-label-secondary);font-size:12px}.cum-inline-facts strong{font-weight:400;color:var(--dsw-alias-label-primary)}.cum-empty{margin:8px 0;color:var(--dsw-alias-label-secondary);font-size:13px}.cum-log{margin-top:12px}.cum-log summary{cursor:pointer;width:fit-content;color:var(--dsw-alias-label-secondary);font-size:12px}.cum-log pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;padding:12px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-1);font-family:var(--ds-font-family-code,monospace);font-size:12px}.cum-dialog{width:min(480px,calc(100vw - 32px));max-width:100%;max-height:calc(100vh - 48px);overflow:auto;overflow-wrap:anywhere}.cum-dialog-message{margin:0;line-height:1.7}.cum-install-target{margin:16px 0 0;min-width:0}.cum-install-target dt{font-size:12px;color:var(--dsw-alias-label-secondary);margin-top:12px}.cum-install-target dd{margin:4px 0 0;min-width:0}.cum-install-list{margin:0;padding-left:18px}.cum-install-list li{padding:3px 0;overflow-wrap:anywhere}.cum-install-list code{white-space:normal;word-break:break-word}.cum-refresh{width:32px;height:32px;padding:0;flex:none}
+.cum-inline-facts{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px;margin:0 0 14px;color:var(--dsw-alias-label-secondary);font-size:12px}.cum-inline-facts strong{font-weight:400;color:var(--dsw-alias-label-primary)}.cum-empty{margin:8px 0;color:var(--dsw-alias-label-secondary);font-size:13px}.cum-log{margin-top:12px}.cum-log summary{cursor:pointer;width:fit-content;color:var(--dsw-alias-label-secondary);font-size:12px}.cum-log pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;padding:12px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-1);font-family:monospace;font-size:12px}.cum-dialog{width:min(480px,calc(100vw - 32px));max-width:100%;max-height:calc(100vh - 48px);overflow:auto;overflow-wrap:anywhere}.cum-dialog-message{margin:0;line-height:1.7}.cum-install-target{margin:16px 0 0;min-width:0}.cum-install-target dt{font-size:12px;color:var(--dsw-alias-label-secondary);margin-top:12px}.cum-install-target dd{margin:4px 0 0;min-width:0}.cum-install-list{margin:0;padding-left:18px}.cum-install-list li{padding:3px 0;overflow-wrap:anywhere}.cum-install-list code{white-space:normal;word-break:break-word}.cum-refresh{width:32px;height:32px;padding:0;flex:none}
 @media(max-width:760px){.cum-inner{padding:22px 20px 32px}.cum-facts{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.cum-header{padding-bottom:18px}.cum-section{padding:18px 0}.cum-packages{min-width:590px}.cum-health{min-width:510px}.cum-history{min-width:620px}}
 @media(max-width:400px){.cum-inner{padding:18px 14px 28px}.cum-service-row{gap:10px}.cum-header h1{font-size:20px}.cum-section-head{align-items:flex-start}.cum-actions{gap:6px}}
 `;
@@ -104,6 +187,9 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState('');
       const [fetching, setFetching] = React.useState(false);
       const [confirmation, setConfirmation] = React.useState(null);
+      const confirmationOpen = React.useRef(false);
+      confirmationOpen.current = !!confirmation;
+      const focusReturn = React.useRef(null);
       const root = React.useRef(null);
       const alive = React.useRef(false);
       const activeRequest = React.useRef(null);
@@ -138,7 +224,7 @@ window.__ModuleLoader__.load({
       }, []);
       React.useEffect(() => {
         alive.current = true;
-        const refresh = () => { if (visible()) void request(); };
+        const refresh = () => { if (!confirmationOpen.current && visible()) void request(); };
         refresh();
         const interval = setInterval(refresh, 3000);
         document.addEventListener('visibilitychange', refresh);
@@ -203,7 +289,7 @@ window.__ModuleLoader__.load({
       const logText = Array.isArray(log) ? log.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n') : typeof log === 'string' ? log : log ? JSON.stringify(log, null, 2) : '';
       return h('div', { ref: root, className: 'cum-page', 'data-computer-use-manager': true },
         h('style', null, CSS),
-        h('div', { className: 'cum-inner' },
+        h('div', { className: 'cum-inner', inert: !!confirmation, 'aria-hidden': confirmation ? true : undefined, onFocusCapture: event => { if (!confirmationOpen.current) focusReturn.current = event.target; } },
           h('header', { className: 'cum-header' },
             h('div', null, h('h1', null, t('title')),
               h('div', { className: 'cum-header-meta' },
@@ -257,7 +343,7 @@ window.__ModuleLoader__.load({
                 h('table', { className: 'cum-table cum-history' }, h('thead', null, h('tr', null, ...['time', 'action', 'result', 'details'].map(key => h('th', { key, scope: 'col' }, t(key))))),
                   h('tbody', null, history.map((item, index) => h('tr', { key: item.time + ':' + index }, h('td', { className: 'cum-subtle' }, showTime(item.time)), h('td', null, actionLabel(item.kind)), h('td', null, h(Status, { status: item.status }, operationLabel(item.status))), h('td', null, item.message || t('none'))))))) : h('p', { className: 'cum-empty' }, t('noHistory')))) : null),
         confirmation ? h(UI.Modal, {
-          open: true, className: 'cum-dialog', title: t(confirmation.kind === 'activate' ? 'activateTitle' : confirmation.kind === 'disable' ? 'disableTitle' : 'updateTitle'), closeLabel: t('cancel'), onClose: dismissConfirmation,
+          open: true, returnFocus: focusReturn.current, className: 'cum-dialog', title: t(confirmation.kind === 'activate' ? 'activateTitle' : confirmation.kind === 'disable' ? 'disableTitle' : 'updateTitle'), closeLabel: t('cancel'), onClose: dismissConfirmation,
           footer: h(React.Fragment, null,
             button('cancel', dismissConfirmation, null, { disabled: false, 'data-modal-autofocus': true }),
             button(confirmation.kind === 'activate' ? 'activateConfirm' : confirmation.kind === 'disable' ? 'disableConfirm' : 'updateConfirm', confirmAction, null, { variant: 'primary' })),

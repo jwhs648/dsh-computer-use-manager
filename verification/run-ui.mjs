@@ -1,33 +1,43 @@
-import { build } from 'esbuild';
-import { chromium, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { mkdir } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { createHostFixture, packageNames } from './host-fixture.mjs';
 
+let dependencies = createRequire(import.meta.url);
+try { dependencies.resolve('esbuild'); } catch { dependencies = createRequire(new URL('../../dsh-computer-use-manager/verification/package.json', import.meta.url)); }
+const { build } = dependencies('esbuild');
+const { chromium, expect } = dependencies('@playwright/test');
 const here = new URL('./', import.meta.url);
 const screenshots = fileURLToPath(new URL('screenshots/', here));
-await build({ entryPoints: [fileURLToPath(new URL('harness.js', here))], bundle: true, format: 'iife', outfile: fileURLToPath(new URL('harness.bundle.js', here)), define: { 'process.env.NODE_ENV': '"production"' } });
+await build({ entryPoints: [fileURLToPath(new URL('harness.js', here))], bundle: true, format: 'iife', outfile: fileURLToPath(new URL('harness.bundle.js', here)), define: { 'process.env.NODE_ENV': '"production"' }, plugins: [{ name: 'existing-verification-dependencies', setup(builder) { builder.onResolve({ filter: /^(react|react-dom)(\/.*)?$/ }, args => ({ path: dependencies.resolve(args.path) })); } }] });
 await mkdir(screenshots, { recursive: true });
 const browser = await chromium.launch({ headless: true, executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe' });
-const errors = [];
+const pageErrors = [];
+const consoleErrors = [];
 const results = [];
 const pages = [];
+const fixtures = [];
 const fixedTime = new Date('2026-11-06T15:00:00Z');
-const packageNames = ['@deepseek-ai/dsh-computer-use', '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native', '@deepseek-ai/dsh-mcp-client'];
 async function scenario(options = {}, width = 1280) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
+  const fixture = await createHostFixture(options);
+  fixtures.push(fixture);
   pages.push(page);
-  page.on('pageerror', error => errors.push(error.message));
+  await page.exposeBinding('__managerBridge', (_source, message) => fixture.bridge(message));
+  page.on('pageerror', error => pageErrors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   await page.clock.install({ time: fixedTime });
   const url = new URL('harness.html', here);
   for (const [key, value] of Object.entries(options)) url.searchParams.set(key, value);
   await page.goto(url.href);
   await page.clock.pauseAt(new Date(fixedTime.getTime() + 1000));
   await expect(page.getByRole('switch')).toBeVisible();
+  assert.deepEqual(await page.evaluate(() => window.fixture.modules), ['react']);
   return page;
 }
-const tick = (page, ms = 3300) => page.clock.runFor(ms);
-const stats = page => page.evaluate(() => ({ calls: window.fixture.calls, events: window.fixture.events, installs: window.fixture.installs, enables: window.fixture.enables, healthRuns: window.fixture.healthRuns, state: window.fixture.state, getCount: window.fixture.getCount, maxActiveRequests: window.fixture.maxActiveRequests, abortedRequests: window.fixture.abortedRequests }));
+const tick = async (page, ms = 3300) => { await page.evaluate(() => window.__managerBridge({ kind: 'settle' })); await page.clock.runFor(ms); };
+const stats = page => page.evaluate(async () => ({ ...await window.__managerBridge({ kind: 'stats' }), getCount: window.fixture.getCount, maxActiveRequests: window.fixture.maxActiveRequests, abortedRequests: window.fixture.abortedRequests }));
 async function pending(page) {
   await page.getByRole('switch').click();
   await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
@@ -41,6 +51,7 @@ async function approve(page, label = '安装并启用') {
   await expect(page.getByRole('dialog')).toHaveCount(0);
 }
 async function test(name, run) {
+  if (process.env.CUM_UI_FILTER && !new RegExp(process.env.CUM_UI_FILTER).test(name)) return;
   await run();
   results.push(name);
   console.log('PASS: ' + name);
@@ -57,7 +68,7 @@ try {
     await expect(page.getByText('screen_capture_capability', { exact: true })).toBeVisible();
     await page.getByRole('switch').click();
     await expect(page.getByRole('dialog')).toContainText('停用会影响当前配置下的所有会话');
-    await page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }).first().click();
+    await page.getByRole('dialog').locator('[data-modal-autofocus]').click();
     assert.equal((await stats(page)).calls.filter(item => item.action === 'setEnabled').length, 0);
     await page.getByRole('switch').click();
     await page.getByRole('button', { name: '确认停用', exact: true }).click();
@@ -103,10 +114,11 @@ try {
   for (const method of ['button', 'close', 'escape']) await test('cancel via ' + method + ' never reopens or continues activation', async () => {
     const page = await scenario({ scenario: 'missing' });
     await pending(page);
-    if (method === 'button') await page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }).first().click();
+    if (method === 'button') await page.getByRole('dialog').locator('[data-modal-autofocus]').click();
     if (method === 'close') await page.locator('[data-dialog-close]').click();
     if (method === 'escape') await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('switch')).toBeFocused();
     await tick(page, 7000);
     await expect(page.getByRole('dialog')).toHaveCount(0);
     const result = await stats(page);
@@ -122,7 +134,7 @@ try {
   });
   await test('foreign activation approval is never opened by polling', async () => {
     const page = await scenario({ scenario: 'missing' });
-    await page.evaluate(() => { window.fixture.state.operation = { id: 'foreign', kind: 'activate', status: 'needs-confirmation', confirmation: { approvalId: 'foreign-approval', version: '0.2.2-rc.1', packages: ['foreign-package'] } }; });
+    await page.evaluate(() => window.__managerBridge({ kind: 'foreign' }));
     await tick(page, 7000);
     await expect(page.getByRole('dialog')).toHaveCount(0);
     assert.equal((await stats(page)).calls.length, 0);
@@ -136,15 +148,21 @@ try {
     assert.equal(result.state.operation.status, 'failed');
     assert.equal(result.state.health, null);
     assert.equal(result.enables + result.healthRuns, 0);
-    await expect(page.locator('[data-operation-message]')).toContainText('remains disabled');
+    await expect(page.locator('[data-operation-message]')).toContainText('installation failed');
   });
-  await test('restart requirement remains explicit and is not presented as enabled', async () => {
+  await test('restart preserves enabled configuration while runtime remains inactive', async () => {
     const page = await scenario({ scenario: 'missing', outcome: 'restart' });
     await pending(page);
     await approve(page);
-    await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByText('需要重启 DSH', { exact: true }).first()).toBeVisible();
-    assert.equal((await stats(page)).state.operation.status, 'restart-required');
+    const result = await stats(page);
+    assert.equal(result.state.operation.status, 'restart-required');
+    assert.equal(result.state.configuredEnabled, true);
+    assert.equal(result.state.running, false);
+    assert.equal(result.healthRuns, 0);
+    assert.equal(result.enables, 1);
+    assert.ok(result.events.includes('enabling'));
   });
   for (const outcome of ['warning', 'health-unavailable']) await test('health ' + outcome + ' retains truthful enabled and diagnostic states', async () => {
     const page = await scenario({ scenario: 'ready', outcome });
@@ -232,6 +250,99 @@ try {
     await approve(page, language === 'en' ? 'Install and enable' : '安装并启用');
     await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
   });
-  if (errors.length) throw new Error(errors.join('\n'));
-  console.log(JSON.stringify({ result: 'passed', scenarios: results.length, workflows: results, viewports: [1280, 390, 320], consoleErrors: errors }, null, 2));
-} finally { await browser.close(); }
+  await test('modal traps keyboard focus, survives polling, and restores focus and scrolling', async () => {
+    const page = await scenario({ scenario: 'running' });
+    const toggle = page.getByRole('switch');
+    await page.evaluate(() => { document.body.style.overflow = 'clip'; });
+    await toggle.click();
+    const dialog = page.getByRole('dialog');
+    const cancel = dialog.locator('[data-modal-autofocus]');
+    const confirm = dialog.getByRole('button', { name: '确认停用', exact: true });
+    const close = dialog.locator('[data-dialog-close]');
+    await expect(cancel).toBeFocused();
+    assert.equal(await page.evaluate(() => document.body.style.overflow), 'hidden');
+    assert.equal(await page.locator('.cum-inner').evaluate(element => element.inert), true);
+    await page.keyboard.press('Tab');
+    await expect(confirm).toBeFocused();
+    await tick(page, 7000);
+    await expect(confirm).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(close).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(confirm).toBeFocused();
+    await page.locator('#fixture-focus-anchor').focus();
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+    assert.equal(await page.evaluate(() => document.body.style.overflow), 'clip');
+    assert.equal(await page.locator('.cum-inner').evaluate(element => element.inert), false);
+    await toggle.click();
+    await expect(dialog).toBeVisible();
+    await page.locator('.cum-backdrop').click({ position: { x: 2, y: 2 } });
+    await expect(dialog).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+  });
+  await test('tooltip is keyboard reachable and controls retain stable icon dimensions', async () => {
+    const page = await scenario({ scenario: 'running' });
+    const refresh = page.getByRole('button', { name: '刷新状态', exact: true });
+    const before = await refresh.boundingBox();
+    await refresh.focus();
+    await expect(page.getByRole('tooltip')).toHaveText('刷新状态');
+    await expect(refresh).toHaveAttribute('aria-describedby', /.+/);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('tooltip')).toHaveCount(0);
+    const after = await refresh.boundingBox();
+    assert.deepEqual(after, before);
+    assert.ok(await refresh.locator('svg').count());
+    await page.getByRole('switch').focus();
+    await page.keyboard.press('Space');
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('switch')).toBeFocused();
+  });
+  await test('unmounting an open modal removes listeners, scroll lock, and locale subscriptions', async () => {
+    const page = await scenario({ scenario: 'running' });
+    await page.evaluate(() => { document.body.style.overflow = 'clip'; });
+    await page.getByRole('switch').click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.evaluate(() => window.fixture.unmount());
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    assert.equal(await page.evaluate(() => document.body.style.overflow), 'clip');
+    assert.equal(await page.evaluate(() => window.fixture.subscriberCount()), 0);
+    await page.locator('#fixture-focus-anchor').focus();
+    await page.keyboard.press('Tab');
+    await page.evaluate(() => window.fixture.mount());
+    await expect(page.getByRole('switch')).toBeVisible();
+    await tick(page);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    assert.equal(await page.evaluate(() => window.fixture.subscriberCount()), 1);
+  });
+  for (const theme of ['light', 'dark']) for (const width of [1280, 390, 320]) await test(theme + ' theme page and modal fit ' + width + 'px', async () => {
+    const page = await scenario({ scenario: 'running', theme, locale: width === 320 ? 'en' : 'zh' }, width);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    const colors = await page.locator('.cum-page').evaluate(element => ({ background: getComputedStyle(element).backgroundColor, foreground: getComputedStyle(element).color }));
+    assert.notEqual(colors.background, colors.foreground);
+    assert.notEqual(colors.background, 'rgba(0, 0, 0, 0)');
+    await page.screenshot({ path: screenshots + '/page-' + theme + '-' + width + '.png', fullPage: true });
+    await page.getByRole('switch').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    const geometry = await dialog.evaluate(element => { const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, overflowing: element.scrollWidth > element.clientWidth }; });
+    assert.ok(geometry.left >= 0 && geometry.right <= width && geometry.top >= 0 && geometry.bottom <= 900, JSON.stringify(geometry));
+    assert.equal(geometry.overflowing, false);
+    const buttons = await dialog.locator('button').evaluateAll(elements => elements.map(element => ({ text: element.textContent, clipped: element.scrollWidth > element.clientWidth, height: element.getBoundingClientRect().height })));
+    assert.ok(buttons.every(button => !button.clipped && button.height >= 28), JSON.stringify(buttons));
+    await page.screenshot({ path: screenshots + '/modal-' + theme + '-' + width + '.png', fullPage: true });
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('switch')).toBeFocused();
+  });
+  assert.deepEqual(pageErrors, []);
+  assert.deepEqual(consoleErrors, []);
+  const report = { result: 'passed', boundary: 'Isolated browser renders the production client and calls the production ComputerUseManager and createApiHandler through an in-memory Playwright bridge. Runtime, locale, module loader, slot hosting, and theme tokens are fixtures; this is not live Harness GUI integration.', scenarios: results.length, workflows: results, viewports: [1280, 390, 320], themes: ['light', 'dark'], consoleErrors, pageErrors };
+  await writeFile(new URL('results.json', here), JSON.stringify(report, null, 2) + '\n');
+  console.log(JSON.stringify(report, null, 2));
+} finally {
+  await browser.close();
+  await Promise.all(fixtures.map(fixture => fixture.dispose()));
+}

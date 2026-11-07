@@ -1,48 +1,113 @@
-# Developer Notes
+# Developer notes
 
-A local DSH bundle for the Windows native Cua Driver provider. It keeps the manager available independently from the optional driver.
-
-## Operations
-
-- Displays saved enablement separately from the live provider, registered tools, and health checks.
-- Switching on starts one server-owned flow: check prerequisites, obtain installation approval when matching components are missing, then install if needed, enable, wait for the real provider and run health checks. Switching off uses DSH profile management.
-- Checks compatible components: queries the three fixed official dependencies at the exact currently running DSH version, using the profile's pnpm registry configuration. This is not a latest-release check for DSH or its components.
-- Installs matching versions of only those dependencies, using the managed package command and profile reconciliation.
-- Reports activation errors and restart requirements without bypassing version checks or restarting DSH.
-
-Package installation and driver changes affect every session on the current profile. No desktop input or screenshots are sent by the health check. Downloads require explicit installation approval, including when initiated from the switch. There is no unattended installation or scheduled task.
+A local DSH bundle for the Windows native Cua Driver provider. The manager
+remains available independently of the optional driver. Version 0.1.0-alpha.2
+is a safety-fix prerelease for the verified DSH 0.2.2-rc.1 host.
 
 ## Integration
 
-The package is a selected local profile bundle. It owns the manager, computer-use registry and native-provider rows. Both optional component rows start disabled in a fresh installation; the profile stores the chosen enablement override. The client uses the existing DSH shell module loader and shared controls. It does not require a separate server.
+The selected profile bundle owns the manager, computer-use registry and
+native-provider rows. Both optional rows are disabled on a fresh installation;
+profile overrides preserve an existing installation's choice. The client uses
+the shell module loader, React, theme tokens and its own accessible controls.
+It imports no internal Harness client package and needs no separate server.
 
-GET `/api/computer-use-manager` reads current state. POST accepts only `activate`, `setEnabled`, `checkUpdates`, `update` and `health`, with same-origin and custom-header checks in addition to the existing DSH connection authentication.
+GET `/api/computer-use-manager` reads state. POST accepts only `activate`,
+`setEnabled`, `checkUpdates`, `update` and `health`. Same-origin, custom-header,
+JSON and body-size checks supplement the existing DSH connection authentication.
 
-`activate` without arguments checks installed components. Missing or incompatible components are checked against the exact current DSH version before returning `operation.status: needs-confirmation` and `operation.confirmation: { approvalId, version, packages }`. Nothing is installed or enabled at that stage. The native modal may continue with `activate` and the paired `installVersion` / `approvalId`. Approval is instance-owned, expires after five minutes, is bound to the host version, and is consumed before installation. A changed host version, stale approval, cancellation or an unsuccessful prerequisite check cannot silently start an installation.
+The read-only `computer_use_status` tool reports saved configuration separately
+from the current provider, registered tools and latest health result. Diagnostics
+do not send desktop input or capture a screenshot.
 
-Activation continues on the host, not through chained browser requests. Local-compatible activation does not need a registry request or download. Startup failures attempt to restore the prior saved enablement after outstanding host writes settle. An observed newer configuration change is preserved instead of blindly restoring stale values. The official host toggles acquire separate locks, so this is compensating recovery, not a global multi-client transaction. Restart requirements and health warnings are distinct outcomes, not successful health claims.
+## Activation and approval
 
-## Installation on Another Computer
+Activation runs on the Host. Compatible local packages require no network
+lookup or installation. Missing or incompatible packages must first be checked
+against the exact running DSH version. The response contains a five-minute,
+one-use instance-owned approval, bound to that version and the three fixed
+package names. A stale approval, changed host version or failed prerequisite
+check cannot silently start an installation.
 
-Install tagged GitHub Release archives using the DSH Plugins page. For local development, a directory link must point to your own checkout; never reuse another user's absolute path. The package remains private to prevent accidental npm publication.
+After installation, configuration must still match the pre-install snapshot.
+Only then may the flow enable rows, wait for the actual native provider and
+run health checks. Saved enablement, runtime readiness, restart requirements
+and health warnings remain distinct. A restart-required result can correctly
+have `configuredEnabled: true` while the current provider is not running.
 
-- Use a supported DSH version with the declared host peer services. The existing integration has been verified on Windows Desktop 0.2.2-rc.1, not on every operating system or DSH release.
-- A fresh bundle selection leaves the native provider disabled. Turn its switch on to run the prerequisite and activation flow. Installed compatible dependencies are enabled directly, followed by readiness verification and a read-only health check.
-- Missing or incompatible components produce an installation-and-enablement confirmation automatically. Approve the exact matching target to download and continue; cancelling leaves the capability off. The separate component-install action still preserves an intentionally disabled provider.
-- OS accessibility and capture permissions still apply. Enabling a DSH plugin does not grant or bypass system permissions, and loading changes may require restarting DSH.
+## Package-operation admission
 
-The fresh-install sequence is covered with isolated host adapters and a simulated browser workflow; it has not been exercised on a second physical machine.
+This version supports only DSH 0.2.2-rc.1 and the matching Host peers. The
+production admission adapter depends on a verified layout of that version;
+it is not a claimed public cross-version admission API.
 
-## Recovery Boundaries
+The adapter takes the official profile package lock, then checks for
+`.plugin-manager/run.json` before taking a profile snapshot or reading update
+configuration. Any existing record, including an invalid or stale one, blocks
+the operation. The manager does not inspect PIDs, delete records or copy the
+official installer's private liveness heuristics. An operator must use the
+official plugin management/recovery process to inspect and settle that state.
 
-The manager separates saved configuration, compatibility and active runtime state. A normal restart retains the profile selection and enablement override. A full Desktop recovery can deselect custom bundles; installed dependencies remain, but a deselected manager cannot reactivate itself. Re-enable the installed manager bundle from the DSH Plugins page in that case. The driver is disabled by default when no saved override survives.
+Every package command forces `--config.ignore-scripts=true` in the launcher's
+argument prefix and script-disable environment settings. The prefix also applies
+to the helper's internal compatibility-repair command. No build-script permission
+is granted. The pinned helper can finish an internal repair before reacting to
+cancellation; the manager must not release its lock while its writer is settling.
 
-The manager declares support for the DSH 0.2 API family starting at 0.2.2-rc.1. A future incompatible API family requires updating the manager itself. A matching component update is never a compatibility exemption.
+The helper's public nonzero/exception result cannot distinguish pre-start refusal
+from an unsettled writer. Only a successful, non-timeout helper result grants
+snapshot-recovery ownership to this adapter. An unconfirmed result therefore
+requires official repair instead of blind metadata restoration. Each subsequent
+repair needs its own settlement confirmation; ownership from the first run does
+not authorize writing over an uncertain second writer.
+
+## Enablement recovery
+
+Recovery tracks expected configuration and grants made by the current operation.
+It may revoke its own false-to-true changes; it never restores a saved `true` by
+turning a disabled capability on again. An observed conflicting change stops
+compensation. This applies to ordinary failures, timeouts and cancellation,
+not only errors named `configuration_changed`.
+
+Official toggles use their own lock and HMR transaction. There is no atomic
+compare-and-swap across clients; a same-value ABA change cannot be identified.
+The recovery policy is deliberately conservative and is not a global transaction
+or a guarantee against arbitrary out-of-band edits of profile files.
+
+## Unload and HMR
+
+Disposal marks the manager unavailable, consumes outstanding approvals and
+aborts owned work, but does not join a promise that may be waiting behind the
+HMR transaction disposing it. An already accepted official toggle cannot be
+cancelled through the current API and may settle after unload. No continuation
+of the disposed instance may enqueue a new toggle or reconciliation.
+
+A queued reconciliation checks disposal and its signal again when it actually
+gets the queue. Package cleanup keeps its own write lock until it settles, skips
+HMR when disposed and marks restart/repair needs instead of hanging global HMR.
+Uninstalling the manager does not uninstall or implicitly disable the driver.
 
 ## Validation
 
-Run `node --test core.test.js api.test.js` from this directory. The endpoint tests cover restricted arguments, cross-origin writes, cache policy and error redaction. Core tests cover state, matching-version updates and lifecycle safety.
+```powershell
+node --test core.test.js api.test.js package.test.js
+```
+
+Core regression tests cover real serial queue semantics with injected Host
+boundaries, cancellation after an external disable, configuration changes during
+installation, production admission/runner contracts and uncertain recovery
+writers. API tests cover argument restrictions, authentication-adjacent CSRF
+checks, cache policy and diagnostic redaction. Package tests cover display
+resources, exact host range, default-disabled component rows and client imports.
+
+The existing browser runner renders the real client and calls the real manager
+and endpoint handler through an in-memory bridge. Installation, registry,
+configuration, HMR and driver services are substitutes; this is not evidence
+of a second machine's first install or a live DSH application's visual state.
+Live installation and UI verification must be reported separately.
 
 ## License
 
-The original source code of this plugin is licensed under the [MIT License](LICENSE). DSH, Cua Driver and other third-party components retain their own licenses; this license does not relicense those components.
+Original source and the package icon are MIT licensed. Inline control icons
+retain the Lucide ISC and Feather MIT notices in `THIRD_PARTY_NOTICES.md`.
+DSH, Cua Driver and other third-party components retain their own licenses.

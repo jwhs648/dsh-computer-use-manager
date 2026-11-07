@@ -1,22 +1,23 @@
 {
   "name": "@local/dsh-computer-use-manager",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "private": true,
   "license": "MIT",
   "type": "module",
   "description": "Computer-use capability manager for DeepSeek Harness: guided activation, matching component installation and read-only health checks.",
   "engines": {
-    "dsh": ">=0.2.2-rc.1 <0.3.0"
+    "dsh": "0.2.2-rc.1"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-app-boot": ">=0.2.2-rc.1 <0.3.0",
-    "@deepseek-ai/dsh-plugin-manager": ">=0.2.2-rc.1 <0.3.0",
-    "@deepseek-ai/dsh-atomic-write": ">=0.2.2-rc.1 <0.3.0"
+    "@deepseek-ai/dsh-app-boot": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-plugin-manager": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-atomic-write": "0.2.2-rc.1"
   },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
   "files": [
@@ -28,11 +29,13 @@
     "locale/*.json",
     "README.md",
     "LICENSE",
+    "icon.svg",
+    "THIRD_PARTY_NOTICES.md",
     "docs/",
     "CHANGELOG.md"
   ],
   "scripts": {
-    "test": "node --test core.test.js api.test.js"
+    "test": "node --test core.test.js api.test.js package.test.js"
   },
   "dsh": {
     "bundle": {

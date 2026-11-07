@@ -3,6 +3,7 @@ verification/harness.bundle.js
 verification/screenshots/
 verification/*-result.json
 verification/*-report.json
+verification/results.json
 dist/
 *.tgz
 *.log

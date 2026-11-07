@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ComputerUseManager } from './core.js';
+import { ComputerUseManager, admitProfileUpdate, runProfilePackages } from './core.js';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const VERSION = '0.2.2-rc.1';
 const NAMES = ['@deepseek-ai/dsh-computer-use', '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native', '@deepseek-ai/dsh-mcp-client'];
@@ -90,6 +93,7 @@ function fixture(options = {}) {
       try { return await callback(); }
       finally { lock = false; calls.push(['unlock']); }
     },
+    admit: async (_ctx, signal) => { assert.equal(lock, true); signal.throwIfAborted(); calls.push(['admit']); },
     backup: async () => {
       assert.equal(lock, true);
       calls.push(['backup']);
@@ -107,6 +111,7 @@ function fixture(options = {}) {
         manifests.clear();
         for (const [name, value] of savedManifests) manifests.set(name, copy(value));
       }
+      execution.onSettled();
       return { exitCode: 0, output: '' };
     },
   };
@@ -143,6 +148,7 @@ test('registry lookup failures preserve safe JSON stdout, exit codes and timeout
 test('loads without host peers and returns detached exact-version runtime state', async () => {
   const f = fixture();
   const state = await f.manager.state();
+  assert.equal(state.managerVersion, '0.1.0-alpha.2');
   assert.equal(state.runtimeVersion, VERSION);
   assert.equal(state.platform, 'win32');
   assert.equal(state.status, 'running');
@@ -300,7 +306,7 @@ test('update installs only exact fixed specs without scripts and reconciles unde
   assert.equal(state.operation.status, 'done');
   assert.equal(state.update.status, 'current');
   assert.deepEqual(f.calls.filter(call => call[0] === 'run'), [['run', ['add', '--save-exact', '--ignore-scripts', ...NAMES.map(name => name + '@' + VERSION)]]]);
-  assert.deepEqual(f.calls.slice(3).map(call => call[0]), ['lock', 'backup', 'run', 'hmr-enter', 'reconcile', 'hmr-exit', 'unlock']);
+  assert.deepEqual(f.calls.slice(3).map(call => call[0]), ['lock', 'admit', 'backup', 'run', 'hmr-enter', 'reconcile', 'hmr-exit', 'unlock']);
   assert.equal(f.isLocked(), false);
 });
 
@@ -394,7 +400,7 @@ test('timeout cancels package work but preserves serialization through independe
   f.runtime.run = async (...args) => {
     if (args[1][0] === 'add') {
       entered.resolve();
-      return new Promise((_, reject) => args[2].signal.addEventListener('abort', () => reject(args[2].signal.reason), { once: true }));
+      return new Promise((_, reject) => args[2].signal.addEventListener('abort', () => { args[2].onSettled(); reject(args[2].signal.reason); }, { once: true }));
     }
     assert.equal(args[2].signal.aborted, false, 'recovery gets a fresh deadline');
     recoveryEntered.resolve();
@@ -494,7 +500,7 @@ test('history is bounded, detached, and latest-first', async () => {
   assert.notEqual((await f.manager.state()).history[0].message, 'changed');
 });
 
-test('dispose aborts active reads, awaits settlement, and prevents subsequent actions', async () => {
+test('dispose aborts active reads without joining host queues and prevents subsequent actions', async () => {
   const f = fixture();
   const entered = deferred();
   let signal;
@@ -506,6 +512,7 @@ test('dispose aborts active reads, awaits settlement, and prevents subsequent ac
   await f.manager.start('checkUpdates');
   await entered.promise;
   await f.manager.dispose();
+  await f.manager.pending;
   assert.equal(signal.aborted, true);
   assert.equal((await f.manager.state()).operation.status, 'failed');
   await assert.rejects(f.manager.start('health'), error => error.code === 'disposed');
@@ -801,7 +808,7 @@ test('approved install failure never proceeds to enablement or health and consum
   assert.equal(f.calls.length, 0);
 });
 
-test('startup failure restores precisely every prior combination of saved enablement', async t => {
+test('startup failure revokes only this operation grants and never restores prior true values', async t => {
   for (const previous of [[false, false], [true, false], [false, true], [true, true]]) await t.test(previous.join('/'), async () => {
     const f = activationFixture();
     for (let index = 0; index < 2; index++) {
@@ -818,7 +825,7 @@ test('startup failure restores precisely every prior combination of saved enable
     };
     const state = await perform(f.manager, 'activate');
     assert.equal(state.operation.status, 'failed');
-    assert.match(state.operation.message, /Previous enablement was restored/);
+    assert.doesNotMatch(state.operation.message, /Previous enablement was restored/);
     assert.deepEqual(f.configured.map(row => row.configuredEnabled), previous);
     if (previous[0] && !previous[1]) assert.equal(f.calls.some(call => call[0] === 'toggle' && call[1] === 'include:' + IDS[0] && call[2] === false), false, 'main=true/provider=false must not disable main');
   });
@@ -955,10 +962,12 @@ test('activation cancellation during preflight or health never continues to furt
     await f.manager.start('activate');
     await entered.promise;
     await f.manager.dispose();
+    await f.manager.pending;
     const state = await f.manager.state();
     assert.equal(state.operation.status, 'failed');
     assert.equal(state.operation.confirmation, undefined);
-    assert.deepEqual(f.configured.map(row => row.configuredEnabled), [false, false]);
+    assert.deepEqual(f.configured.map(row => row.configuredEnabled), scenario === 'preflight' ? [false, false] : [true, true]);
+    if (scenario === 'health') assert.equal(f.calls.some(call => call[0] === 'toggle' && !call[2]), false, 'unload must not enqueue compensating HMR toggles');
     if (scenario === 'preflight') assert.equal(f.calls.some(call => ['run', 'toggle'].includes(call[0])), false);
   });
 });
@@ -1141,6 +1150,347 @@ test('activation preflight and install failures settle update state while later 
   });
 });
 
+function serialQueue() {
+  let tail = Promise.resolve();
+  return {
+    runExclusive(callback) {
+      const work = tail.then(callback);
+      tail = work.catch(() => {});
+      return work;
+    },
+    drain: () => tail,
+  };
+}
+
+function externalEnablement(f, index, enabled) {
+  f.configured[index].configuredEnabled = enabled;
+  f.rows[index].enabled = enabled;
+  f.rows[index].fiberPhase = enabled ? 'active' : null;
+  f.services.computerUse.providerName = f.rows.every(row => row.enabled) ? 'cua-driver-native' : undefined;
+}
+
+test('production admission rejects every existing run record without reading or deleting it', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'cua-manager-admission-'));
+  const signal = new AbortController().signal;
+  try {
+    await admitProfileUpdate(dir, VERSION, signal);
+    await assert.rejects(admitProfileUpdate(dir, '0.2.3', signal), /reviewed DSH/);
+    await mkdir(join(dir, '.plugin-manager'));
+    for (const text of ['not-json', JSON.stringify({ pid: process.pid, grouped: false }), JSON.stringify({ pid: 999999999, grouped: true })]) {
+      await t.test(text, async () => {
+        await writeFile(join(dir, '.plugin-manager', 'run.json'), text);
+        await assert.rejects(admitProfileUpdate(dir, VERSION, signal), /previous package-operation record/);
+        await assert.rejects(admitProfileUpdate(dir, VERSION, signal), /previous package-operation record/, 'even invalid or stale-looking records must remain');
+      });
+    }
+    const controller = new AbortController();
+    controller.abort(new Error('Cancelled before admission.'));
+    await assert.rejects(admitProfileUpdate(dir, VERSION, controller.signal), /Cancelled/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('production runner suppresses nested helper scripts and confirms ownership only on success', async t => {
+  for (const scenario of ['success', 'nonzero', 'timeout', 'throw']) await t.test(scenario, async () => {
+    const controller = new AbortController();
+    let settled = 0;
+    const onOutput = () => {};
+    const operations = { runProfilePnpm: async (profile, args, options) => {
+      assert.deepEqual(profile, { dir: '/isolated', name: 'test', profile: 'test' });
+      assert.deepEqual(args, ['add', '--ignore-scripts', NAMES[0] + '@' + VERSION]);
+      assert.deepEqual(options.args, ['/launcher/pnpm.cjs', '--config.ignore-scripts=false', '--config.ignore-scripts=true']);
+      assert.deepEqual(options.env, { retained: 'yes', npm_config_ignore_scripts: 'true', pnpm_config_ignore_scripts: 'true' });
+      assert.equal(options.signal, controller.signal);
+      assert.equal(options.onOutput, onOutput);
+      assert.equal(options.activateNewBundles, false);
+      assert.equal(options.idleTimeoutMs, 120000);
+      assert.equal(options.execution, 'service');
+      assert.equal(settled, 0, 'calling the helper is not proof it started or settled');
+      if (scenario === 'throw') throw new Error('No public start information.');
+      return { exitCode: scenario === 'nonzero' ? 1 : 0, output: '', timedOut: scenario === 'timeout' };
+    } };
+    const run = runProfilePackages(operations, { dir: '/isolated', name: 'test' }, {
+      command: 'node', args: ['/launcher/pnpm.cjs', '--config.ignore-scripts=false'],
+      env: { retained: 'yes', NPM_CONFIG_IGNORE_SCRIPTS: 'false', npm_config_ignore_scripts: 'false', PNPM_CONFIG_IGNORE_SCRIPTS: 'false' },
+    }, ['add', '--ignore-scripts', NAMES[0] + '@' + VERSION], { signal: controller.signal, onOutput, onSettled: () => { settled++; } });
+    if (scenario === 'throw') await assert.rejects(run, /No public start/);
+    else await run;
+    assert.equal(settled, scenario === 'success' ? 1 : 0);
+  });
+});
+
+test('admission refusal precedes configuration snapshot, backup, run and recovery', async () => {
+  const f = fixture();
+  const configured = f.runtime.configured;
+  f.runtime.configured = (...args) => {
+    assert.equal(f.isLocked(), false, 'no transaction configuration is read on admission refusal');
+    return configured(...args);
+  };
+  f.runtime.admit = async () => {
+    assert.equal(f.isLocked(), true);
+    throw new Error('Admission refused: earlier package writer remains active.');
+  };
+  const state = await perform(f.manager, 'update');
+  assert.equal(state.operation.status, 'failed');
+  assert.match(state.operation.message, /Admission refused/);
+  assert.equal(f.calls.some(call => ['backup', 'run', 'restore', 'reconcile'].includes(call[0])), false);
+  assert.equal(f.isLocked(), false);
+  assert.equal(f.calls.at(-1)[0], 'unlock');
+});
+
+test('missing admission contract fails closed before any profile snapshot', async () => {
+  const f = fixture();
+  delete f.runtime.admit;
+  const state = await perform(f.manager, 'update');
+  assert.equal(state.operation.status, 'failed');
+  assert.match(state.operation.message, /admission contract/);
+  assert.equal(f.calls.some(call => ['backup', 'run', 'restore', 'reconcile'].includes(call[0])), false);
+  assert.equal(f.isLocked(), false);
+});
+
+test('production nonzero and thrown no-start results never authorize outer restore or repair', async t => {
+  for (const scenario of ['nonzero', 'throw']) await t.test(scenario, async () => {
+    const f = fixture();
+    let helperCalls = 0;
+    const operations = { runProfilePnpm: async () => {
+      helperCalls++;
+      if (scenario === 'throw') throw new Error('Refused without starting.');
+      return { exitCode: 1, output: 'Refused without starting.' };
+    } };
+    f.runtime.run = (_ctx, args, execution) => runProfilePackages(operations, { dir: '/isolated', name: 'test' }, { command: 'pnpm', args: [] }, args, execution);
+    const state = await perform(f.manager, 'update');
+    assert.equal(state.operation.status, 'failed');
+    assert.match(state.operation.message, /no profile metadata was restored/);
+    assert.match(state.operation.message, /official plugin manager/);
+    assert.doesNotMatch(state.operation.message, /were restored/);
+    assert.equal(helperCalls, 1, 'no repair run may start');
+    assert.equal(f.calls.some(call => ['restore', 'reconcile'].includes(call[0])), false);
+    assert.equal(f.isLocked(), false);
+  });
+});
+
+test('unload in a serial HMR queue does not join a package writer holding the profile lock', { timeout: 1500 }, async () => {
+  const f = fixture();
+  const queue = serialQueue();
+  f.services.hmr.runExclusive = callback => queue.runExclusive(callback);
+  const entered = deferred();
+  const run = f.runtime.run;
+  f.runtime.run = async (...args) => {
+    if (args[1][0] !== 'add') return run(...args);
+    entered.resolve();
+    return new Promise((_, reject) => args[2].signal.addEventListener('abort', () => {
+      args[2].onSettled();
+      reject(args[2].signal.reason);
+    }, { once: true }));
+  };
+  await f.manager.start('update');
+  await entered.promise;
+  const pending = f.manager.pending;
+  await queue.runExclusive(async () => {
+    assert.equal(f.isLocked(), true);
+    await f.manager.dispose();
+  });
+  await pending;
+  await queue.drain();
+  assert.equal(f.isLocked(), false);
+  assert.equal(f.calls.some(call => call[0] === 'reconcile'), false, 'disposed recovery cannot enter HMR');
+  assert.equal(f.calls.at(-1)[0], 'unlock');
+});
+
+test('an already queued reconciliation behind unload becomes a no-op and releases its write lock', { timeout: 1500 }, async () => {
+  const f = fixture();
+  const queue = serialQueue();
+  const holdQueue = deferred();
+  const blocked = queue.runExclusive(() => holdQueue.promise);
+  const packageEntered = deferred();
+  const releasePackage = deferred();
+  const reconcileQueued = deferred();
+  f.services.hmr.runExclusive = callback => {
+    reconcileQueued.resolve();
+    return queue.runExclusive(callback);
+  };
+  let reconciles = 0;
+  f.services.hmr.reconcileProfile = async () => { reconciles++; return { pending: [], warnings: [] }; };
+  const run = f.runtime.run;
+  f.runtime.run = async (...args) => {
+    if (args[1][0] === 'add') { packageEntered.resolve(); await releasePackage.promise; }
+    return run(...args);
+  };
+  await f.manager.start('update');
+  await packageEntered.promise;
+  const pending = f.manager.pending;
+  const unload = queue.runExclusive(() => f.manager.dispose());
+  releasePackage.resolve();
+  await reconcileQueued.promise;
+  holdQueue.resolve();
+  await Promise.all([blocked, unload, pending]);
+  await queue.drain();
+  assert.equal(reconciles, 0, 'an old generation callback must not reconcile after unload');
+  assert.equal(f.isLocked(), false);
+  assert.equal(f.calls.at(-1)[0], 'unlock');
+});
+
+test('an official toggle queued behind unload settles without a disposer cycle or follow-up toggle', { timeout: 1500 }, async () => {
+  const f = fixture({ enabled: false });
+  const queue = serialQueue();
+  const holdQueue = deferred();
+  const blocked = queue.runExclusive(() => holdQueue.promise);
+  const queued = deferred();
+  const toggle = f.services.pluginManager.setPluginEnabled;
+  let hostWriteLock = false;
+  f.services.pluginManager.setPluginEnabled = async (...args) => {
+    hostWriteLock = true;
+    queued.resolve();
+    try { return await queue.runExclusive(() => toggle(...args)); }
+    finally { hostWriteLock = false; }
+  };
+  const unload = queue.runExclusive(() => f.manager.dispose());
+  await f.manager.start('setEnabled', { enabled: true });
+  await queued.promise;
+  const pending = f.manager.pending;
+  holdQueue.resolve();
+  await Promise.all([blocked, unload, pending]);
+  await queue.drain();
+  assert.equal(hostWriteLock, false);
+  assert.equal(f.calls.filter(call => call[0] === 'toggle').length, 1, 'only the uncancellable call already handed to Host can finish');
+  assert.deepEqual(f.configured.map(row => row.configuredEnabled), [true, false]);
+  assert.equal(f.manager.snapshot().operation.status, 'failed');
+  assert.equal(f.manager.snapshot().restartRequired, true);
+});
+
+test('existing true enablement plus external disable and abort is never re-granted', async t => {
+  for (const action of ['activate', 'setEnabled']) await t.test(action, async () => {
+    const f = activationFixture({ enabled: true });
+    if (action === 'activate') f.setDefinition({ name: HEALTH, execute: async () => {
+      externalEnablement(f, 1, false);
+      f.manager.controller.abort(new Error('Cancelled after external disable.'));
+      return { structuredContent: f.report };
+    } });
+    else {
+      f.rows[0].enabled = false;
+      const toggle = f.services.pluginManager.setPluginEnabled;
+      f.services.pluginManager.setPluginEnabled = async (...args) => {
+        const result = await toggle(...args);
+        externalEnablement(f, 1, false);
+        f.manager.controller.abort(new Error('Cancelled after external disable.'));
+        return result;
+      };
+    }
+    const state = await perform(f.manager, action, action === 'setEnabled' ? { enabled: true } : undefined);
+    assert.equal(state.operation.status, 'failed');
+    assert.deepEqual(f.configured.map(row => row.configuredEnabled), [true, false]);
+    assert.equal(f.calls.some(call => call[0] === 'toggle' && call[1] === 'include:' + IDS[1] && call[2]), false);
+    assert.doesNotMatch(state.operation.message, /enablement was restored/);
+  });
+});
+
+test('partial disable failure never restores previously true capabilities', async () => {
+  const f = fixture();
+  const toggle = f.services.pluginManager.setPluginEnabled;
+  let count = 0;
+  f.services.pluginManager.setPluginEnabled = async (...args) => ++count === 2 ? { application: 'failed' } : toggle(...args);
+  const state = await perform(f.manager, 'setEnabled', { enabled: false });
+  assert.equal(state.operation.status, 'failed');
+  assert.deepEqual(f.configured.map(row => row.configuredEnabled), [true, false]);
+  assert.equal(f.calls.some(call => call[0] === 'toggle' && call[2]), false);
+});
+
+test('external install-time enablement changes are preserved before activation can toggle', async t => {
+  for (const scenario of ['new-enable', 'existing-disable', 'mixed-change']) await t.test(scenario, async () => {
+    const f = activationFixture({ enabled: scenario === 'existing-disable' });
+    f.manifests.delete(NAMES[1]);
+    const approval = await requestApproval(f);
+    const run = f.runtime.run;
+    f.runtime.run = async (...args) => {
+      const result = await run(...args);
+      if (args[1][0] === 'add') {
+        if (scenario === 'existing-disable') externalEnablement(f, 1, false);
+        else externalEnablement(f, 0, true);
+        if (scenario === 'mixed-change') externalEnablement(f, 1, true);
+      }
+      return result;
+    };
+    const expected = scenario === 'mixed-change' ? [true, true] : [true, false];
+    const state = await perform(f.manager, 'activate', approval);
+    assert.equal(state.operation.status, 'failed');
+    assert.equal(state.operation.code, 'configuration_changed');
+    assert.deepEqual(f.configured.map(row => row.configuredEnabled), expected);
+    assert.equal(f.calls.some(call => call[0] === 'toggle'), false);
+  });
+});
+
+test('external disable during official inventory reads is checked before capability writes', async () => {
+  const f = activationFixture({ enabled: true });
+  let reads = 0;
+  f.services.pluginManager.listPlugins = async () => {
+    if (++reads === 2) externalEnablement(f, 1, false);
+    return copy(f.rows);
+  };
+  const state = await perform(f.manager, 'activate');
+  assert.equal(state.operation.status, 'failed');
+  assert.equal(state.operation.code, 'configuration_changed');
+  assert.equal(f.calls.some(call => call[0] === 'toggle'), false);
+  assert.deepEqual(f.configured.map(row => row.configuredEnabled), [true, false]);
+});
+
+test('each repair writer must confirm its own settlement before final snapshot restore', async t => {
+  for (const outcome of ['throw', 'nonzero', 'success-unconfirmed']) await t.test(outcome, async () => {
+    const f = fixture();
+    const run = f.runtime.run;
+    let repairActive = false;
+    const restore = f.runtime.restore;
+    f.runtime.restore = async (...args) => {
+      assert.equal(repairActive, false, 'a live or unknown repair writer must never be overwritten');
+      return restore(...args);
+    };
+    f.runtime.run = async (...args) => {
+      if (args[1][0] === 'add') {
+        await run(...args);
+        return { exitCode: 1, output: 'First writer failed after confirmed settlement.' };
+      }
+      repairActive = true;
+      if (outcome === 'throw') throw new Error('Repair state unknown; active record remains.');
+      return { exitCode: outcome === 'nonzero' ? 1 : 0, output: 'Repair did not prove its writer stopped.' };
+    };
+    const state = await perform(f.manager, 'update');
+    assert.equal(state.operation.status, 'failed');
+    assert.match(state.operation.message, /Recovery is incomplete/);
+    assert.match(state.operation.log, /repair writer did not confirm settlement/);
+    assert.equal(f.calls.filter(call => call[0] === 'restore').length, 1, 'only the restore before repair may run');
+    assert.equal(f.calls.some(call => call[0] === 'reconcile'), false);
+    assert.equal(f.isLocked(), false);
+  });
+});
+
+test('a toggle rejection after persisting a new grant can revoke only that observed grant', async t => {
+  for (const action of ['activate', 'setEnabled']) await t.test(action, async () => {
+    const f = activationFixture();
+    const toggle = f.services.pluginManager.setPluginEnabled;
+    f.services.pluginManager.setPluginEnabled = async (...args) => {
+      const result = await toggle(...args);
+      if (args[1]) throw new Error('Host rejected after persisting desired enablement.');
+      return result;
+    };
+    const state = await perform(f.manager, action, action === 'setEnabled' ? { enabled: true } : undefined);
+    assert.equal(state.operation.status, 'failed');
+    assert.deepEqual(f.configured.map(row => row.configuredEnabled), [false, false]);
+    assert.deepEqual(f.calls.filter(call => call[0] === 'toggle'), [['toggle', 'include:' + IDS[0], true], ['toggle', 'include:' + IDS[0], false]]);
+  });
+});
+
+test('dispose during backup cannot start a new package writer or restore metadata', async () => {
+  const f = fixture();
+  const backup = f.runtime.backup;
+  f.runtime.backup = async (...args) => {
+    const saved = await backup(...args);
+    await f.manager.dispose();
+    return saved;
+  };
+  await f.manager.start('update');
+  await f.manager.pending;
+  assert.equal(f.calls.some(call => ['run', 'restore', 'reconcile'].includes(call[0])), false);
+  assert.equal(f.isLocked(), false);
+});
+
 test('approved activation abort during installation never enables and retains one-time consumption', async () => {
   const f = activationFixture();
   f.manifests.delete(NAMES[1]);
@@ -1150,7 +1500,7 @@ test('approved activation abort during installation never enables and retains on
   f.runtime.run = async (...args) => {
     if (args[1][0] === 'add') {
       entered.resolve();
-      return new Promise((_, reject) => args[2].signal.addEventListener('abort', () => reject(args[2].signal.reason), { once: true }));
+      return new Promise((_, reject) => args[2].signal.addEventListener('abort', () => { args[2].onSettled(); reject(args[2].signal.reason); }, { once: true }));
     }
     return run(...args);
   };
