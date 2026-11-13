@@ -1,13 +1,10 @@
 # Developer notes
 
-An activation and management bundle for DSH's existing computer-use capability.
-It does not implement or ship a separate computer-control engine: actual desktop
-operations come from DSH's official computer-use components and their Cua Driver
-Native provider. Missing optional components are installed only after user
-confirmation, at versions matching the running DSH host.
-
-The manager remains available independently of the optional driver. Version
-0.1.0-alpha.2 is a safety-fix prerelease for the verified DSH 0.2.2-rc.1 host.
+A local DSH bundle for the Windows native Cua Driver provider. The manager
+remains available independently of the optional driver. Version 0.1.0-alpha.3
+targets Windows x64 with DSH Desktop 0.2.2-rc.2 and its matching Host peers.
+Version 0.1.0-alpha.2 was published on GitHub on 2026-11-07 for rc.1; rc.1
+is outside this release's declared compatibility range.
 
 ## Integration
 
@@ -23,7 +20,17 @@ JSON and body-size checks supplement the existing DSH connection authentication.
 
 The read-only `computer_use_status` tool reports saved configuration separately
 from the current provider, registered tools and latest health result. Diagnostics
-do not send desktop input or capture a screenshot.
+do not send desktop input or capture a screenshot. Health checks are rendered
+by name, status and message, including `ax_capability` and
+`screen_capture_capability`; sanitized driver hints are retained for recovery
+instructions. This plugin does not initialize MCP or assemble agent `read`
+tool calls.
+
+Component-check results are invalidated when the runtime version or component
+identity, version or compatibility changes. The package alignment badge is not
+a latest-release detector. A previously observed HMR pending condition can be
+cleared only after a fresh authoritative check confirms it has resolved; an
+active provider alone does not clear unknown restart or repair requirements.
 
 ## Activation and approval
 
@@ -42,8 +49,8 @@ have `configuredEnabled: true` while the current provider is not running.
 
 ## Package-operation admission
 
-This version supports only DSH 0.2.2-rc.1 and the matching Host peers. The
-production admission adapter depends on a verified layout of that version;
+This version declares only DSH 0.2.2-rc.2 and the matching Host peers. The
+production admission adapter depends on the host package-operation layout;
 it is not a claimed public cross-version admission API.
 
 The adapter takes the official profile package lock, then checks for

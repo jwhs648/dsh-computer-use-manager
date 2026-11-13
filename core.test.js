@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const VERSION = '0.2.2-rc.1';
+const VERSION = '0.2.2-rc.2';
 const NAMES = ['@deepseek-ai/dsh-computer-use', '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native', '@deepseek-ai/dsh-mcp-client'];
 const IDS = ['computer-use', 'computer-use-cua-driver-native'];
 const HEALTH = 'cua_driver_native__health_report';
@@ -131,6 +131,161 @@ async function perform(manager, action, args) {
   return finish(manager);
 }
 
+test('component checks and health expire when versions or compatibility change', async t => {
+  for (const kind of ['version', 'compatibility', 'missing', 'runtime']) await t.test(kind, async () => {
+    const f = fixture();
+    await perform(f.manager, 'checkUpdates');
+    await perform(f.manager, 'health');
+    assert.equal(f.manager.snapshot().update.status, 'current');
+    if (kind === 'version') f.manifests.get(NAMES[1]).version = '0.2.2-rc.1';
+    if (kind === 'compatibility') f.manifests.get(NAMES[1]).compatible = false;
+    if (kind === 'missing') f.manifests.delete(NAMES[1]);
+    if (kind === 'runtime') f.runtime.version = () => '0.2.3';
+    const state = await f.manager.state();
+    assert.equal(state.update.status, 'unchecked');
+    assert.equal(state.update.checkedAt, null);
+    assert.equal(state.update.targetVersion, state.runtimeVersion);
+    assert.equal(state.health, null);
+    assert.ok(state.packages.some(pkg => !pkg.compatible));
+    if (kind !== 'runtime') {
+      const checked = await perform(f.manager, 'checkUpdates');
+      assert.equal(checked.update.status, 'available', 'a fresh check must allow installing matching components');
+    }
+  });
+});
+
+test('an unchanged environment retains a successful component check', async () => {
+  const f = fixture();
+  await perform(f.manager, 'checkUpdates');
+  const before = f.manager.snapshot().update;
+  assert.deepEqual((await f.manager.state()).update, before);
+});
+
+test('a host-version change during registry lookup cannot publish an old success', async () => {
+  const f = fixture();
+  const lookup = f.runtime.lookup;
+  f.runtime.lookup = async (...args) => {
+    const result = await lookup(...args);
+    f.runtime.version = () => '0.2.3';
+    return result;
+  };
+  const state = await perform(f.manager, 'checkUpdates');
+  assert.equal(state.operation.status, 'failed');
+  assert.notEqual(state.update.status, 'current');
+  assert.notEqual(state.update.status, 'available');
+  assert.equal(state.update.targetVersion, '0.2.3');
+});
+
+test('health preserves bounded redacted repair hints without copying raw data', async () => {
+  const f = fixture();
+  f.report.checks = [
+    { name: 'ax_capability', status: 'fail', message: 'Needs attention.', hint: 'Grant permission token=private-value', data: { token: 'private-value' } },
+    { name: 'screen_capture_capability', status: 'pass', message: 'Ready.', hint: 'x'.repeat(2000) },
+    { name: 'other', status: 'skip', message: 'Not applicable.', hint: { secret: 'not-a-string' } },
+  ];
+  const state = await perform(f.manager, 'health');
+  assert.match(state.health.checks[0].hint, /Grant permission/);
+  assert.doesNotMatch(JSON.stringify(state.health), /private-value|not-a-string/);
+  assert.equal(state.health.checks[1].hint.length, 1600);
+  assert.equal(Object.hasOwn(state.health.checks[0], 'data'), false);
+  assert.equal(Object.hasOwn(state.health.checks[2], 'hint'), false);
+});
+
+test('a later activation rechecks known HMR restart requirements before health', async () => {
+  const f = fixture();
+  const reconcile = f.services.hmr.reconcileProfile;
+  f.services.hmr.reconcileProfile = async () => ({ pending: [{ reason: 'host-module', url: 'module' }], warnings: [] });
+  let state = await perform(f.manager, 'update');
+  assert.equal(state.restartRequired, true);
+  assert.equal((await f.manager.state()).restartRequired, true, 'a running old provider alone does not resolve pending code');
+  f.services.hmr.reconcileProfile = reconcile;
+  f.calls.length = 0;
+  state = await perform(f.manager, 'activate');
+  assert.equal(state.restartRequired, false);
+  assert.equal(state.operation.status, 'done');
+  assert.equal(state.health.overall, 'ok');
+  assert.equal(f.calls.filter(call => call[0] === 'reconcile').length, 1);
+  assert.equal(f.calls.some(call => ['run', 'lookup', 'toggle'].includes(call[0])), false);
+});
+
+test('known enablement restart clears only after a clean reconcile and running configuration', async () => {
+  const f = fixture({ enabled: false });
+  const toggle = f.services.pluginManager.setPluginEnabled;
+  f.services.pluginManager.setPluginEnabled = async (...args) => { await toggle(...args); return { application: 'restart-required' }; };
+  assert.equal((await perform(f.manager, 'setEnabled', { enabled: true })).restartRequired, true);
+  const state = await perform(f.manager, 'activate');
+  assert.equal(state.restartRequired, false);
+  assert.equal(state.health.overall, 'ok');
+});
+
+test('quoted multiword and truncated secrets are fully removed from health hints', async t => {
+  for (const hint of [
+    'Use password="correct horse battery staple" and token="private value"',
+    "Use password='correct horse battery staple' and token='private value'",
+    'Use password="correct horse\\" battery staple" and token="private value"',
+    'Use password="correct horse battery staple',
+    'Use password="correct horse battery staple\\',
+    "Use password='correct horse battery staple\\",
+  ]) await t.test(hint, async () => {
+    const f = fixture();
+    f.report.checks = [{ name: 'ax_capability', status: 'fail', message: 'Needs attention.', hint }];
+    const state = await perform(f.manager, 'health');
+    assert.match(state.health.checks[0].hint, /\[redacted\]/);
+    assert.doesNotMatch(JSON.stringify(state.health), /correct|horse|battery|staple|private|value/);
+  });
+});
+
+test('closed configuration with a known enablement restart activates and checks health on the first retry', async () => {
+  const f = fixture({ enabled: false });
+  f.manager.requireRestart('enablement');
+  const state = await perform(f.manager, 'activate');
+  assert.equal(state.restartRequired, false);
+  assert.equal(state.running, true);
+  assert.equal(state.operation.status, 'done');
+  assert.equal(state.health.overall, 'ok');
+  assert.equal(f.calls.filter(call => call[0] === 'toggle').length, 2);
+});
+
+test('activation restart retry queued behind unload cannot reconcile or enable', { timeout: 1500 }, async () => {
+  const f = fixture({ enabled: false });
+  f.manager.requireRestart('hmr');
+  const queue = serialQueue();
+  const hold = deferred();
+  const blocked = queue.runExclusive(() => hold.promise);
+  const queued = deferred();
+  const unload = queue.runExclusive(() => f.manager.dispose());
+  let reconciles = 0;
+  f.services.hmr.runExclusive = callback => { queued.resolve(); return queue.runExclusive(callback); };
+  f.services.hmr.reconcileProfile = async () => { reconciles++; return { pending: [], warnings: [] }; };
+  await f.manager.start('activate');
+  await queued.promise;
+  const pending = f.manager.pending;
+  hold.resolve();
+  await Promise.all([blocked, unload, pending]);
+  await queue.drain();
+  assert.equal(reconciles, 0);
+  assert.equal(f.isLocked(), false);
+  assert.deepEqual(f.configured.map(row => row.configuredEnabled), [false, false]);
+  assert.equal(f.calls.some(call => ['toggle', 'run'].includes(call[0])), false);
+  assert.equal(f.manager.snapshot().operation.status, 'failed');
+  assert.equal(f.manager.snapshot().restartRequired, true);
+});
+
+test('unresolved pending code, invalid reconciliation and uncertain repair never become healthy success', async t => {
+  for (const kind of ['pending', 'invalid', 'repair', 'unknown']) await t.test(kind, async () => {
+    const f = fixture();
+    f.manager.requireRestart('hmr');
+    if (kind === 'repair') f.manager.requireRestart();
+    if (kind === 'unknown') { f.manager.restartReasons.clear(); f.manager.value.restartRequired = true; }
+    f.services.hmr.reconcileProfile = async () => kind === 'invalid' ? undefined : ({ pending: [{ reason: 'host-module' }], warnings: [] });
+    const state = await perform(f.manager, 'activate');
+    assert.equal(state.restartRequired, true);
+    assert.equal(state.health, null);
+    assert.notEqual(state.operation.status, 'done');
+    assert.equal(f.calls.some(call => call[0] === 'run'), false);
+  });
+});
+
 test('registry lookup failures preserve safe JSON stdout, exit codes and timeout context', async () => {
   const f = fixture();
   f.runtime.lookup = async () => ({ exitCode: 1, stdout: JSON.stringify({ error: { code: 'ECONNRESET', message: 'Connection reset token=sk-private-value' } }), stderr: 'TLS failure', timedOut: false });
@@ -148,7 +303,7 @@ test('registry lookup failures preserve safe JSON stdout, exit codes and timeout
 test('loads without host peers and returns detached exact-version runtime state', async () => {
   const f = fixture();
   const state = await f.manager.state();
-  assert.equal(state.managerVersion, '0.1.0-alpha.2');
+  assert.equal(state.managerVersion, '0.1.0-alpha.3');
   assert.equal(state.runtimeVersion, VERSION);
   assert.equal(state.platform, 'win32');
   assert.equal(state.status, 'running');

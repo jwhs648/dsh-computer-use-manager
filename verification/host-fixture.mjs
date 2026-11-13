@@ -3,7 +3,7 @@ import { ComputerUseManager } from '../core.js';
 import { createApiHandler } from '../api.js';
 
 export const packageNames = ['@deepseek-ai/dsh-computer-use', '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native', '@deepseek-ai/dsh-mcp-client'];
-export const version = '0.2.2-rc.1';
+export const version = '0.2.2-rc.2';
 const specs = packageNames.slice(0, 2).map((name, index) => ({ name, id: ['computer-use', 'computer-use-cua-driver-native'][index] }));
 
 // Only the Host boundaries are fake. The manager and HTTP handler are production code.
@@ -24,7 +24,7 @@ export async function createHostFixture(options = {}) {
     const warning = outcome === 'warning';
     return { structuredContent: { overall: warning ? 'degraded' : 'ok', checks: [
       { name: 'binary_version', status: 'pass', message: 'cua-driver fixture version' },
-      { name: 'ax_capability', status: warning ? 'fail' : 'pass', message: warning ? 'UIAutomation fixture requires attention.' : 'UIAutomation fixture passed.' },
+      { name: 'ax_capability', status: warning ? 'fail' : 'pass', message: warning ? 'UIAutomation fixture requires attention.' : 'UIAutomation fixture passed.', ...(warning ? { hint: 'Check the fixture accessibility configuration.' } : {}) },
       { name: 'screen_capture_capability', status: 'pass', message: 'Screen capture fixture passed.' },
     ] } };
   } };
@@ -44,7 +44,7 @@ export async function createHostFixture(options = {}) {
     },
     get computerUse() { return { providerName: active() ? 'cua-driver-native' : undefined }; },
     tools: { definitions: () => active() ? tools : [], get: name => active() ? tools.find(tool => tool.name === name) : undefined },
-    hmr: { runExclusive: callback => callback(), reconcileProfile: async () => outcome === 'restart' ? { pending: [specs[1].id] } : {} },
+    hmr: { runExclusive: callback => callback(), reconcileProfile: async () => ({ warnings: [], pending: outcome === 'restart' ? [{ reason: 'host-module', url: 'fixture://computer-use-cua-driver-native' }] : [] }) },
   };
   const runtime = {
     platform: 'win32', version: () => version, configured: () => structuredClone(configured),

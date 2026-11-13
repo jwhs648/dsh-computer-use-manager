@@ -6,7 +6,7 @@ import { lstat } from 'node:fs/promises';
 // This layout is verified against the shipped operations implementation, not a public admission API.
 export async function admitProfileUpdate(dir, version, signal) {
   signal.throwIfAborted();
-  if (version !== '0.2.2-rc.1') throw fail('Package updates require a reviewed DSH package-operation admission contract.', 'unavailable');
+  if (version !== '0.2.2-rc.2') throw fail('Package updates require a reviewed DSH package-operation admission contract.', 'unavailable');
   try {
     await lstat(join(dir, '.plugin-manager', 'run.json'));
   } catch (error) {
@@ -17,7 +17,7 @@ export async function admitProfileUpdate(dir, version, signal) {
   throw fail('A previous package-operation record exists. Use the official plugin manager to settle or inspect it before retrying; no profile snapshot was taken.', 'unavailable');
 }
 
-const MANAGER_VERSION = '0.1.0-alpha.2';
+const MANAGER_VERSION = '0.1.0-alpha.3';
 const PROVIDER = 'cua-driver-native';
 const PREFIX = 'cua_driver_native__';
 const HEALTH_TOOL = PREFIX + 'health_report';
@@ -39,7 +39,7 @@ function clean(value, limit = 1600) {
     .replace(/(https?:\/\/)[^\s/@]+@/gi, '$1[redacted]@')
     .replace(/([?&][A-Za-z0-9_%.-]+=)[^&#\s"']+/g, '$1[redacted]')
     .replace(/\b(?:sk-|npm_)[A-Za-z0-9_-]+/g, '[redacted]')
-    .replace(/\b((?:authorization|[A-Za-z0-9_-]*(?:token|secret|password)|api[_-]?key|key)["']?\s*[=:]\s*["']?)(?:bearer\s+)?[^\s"'&,;]+/gi, '$1[redacted]')
+    .replace(/\b((?:authorization|[A-Za-z0-9_-]*(?:token|secret|password)|api[_-]?key|key)["']?\s*[=:]\s*)(?:"(?:\\(?:[\s\S]|$)|[^"\\])*(?:"|$)|'(?:\\(?:[\s\S]|$)|[^'\\])*(?:'|$)|(?:bearer\s+)?[^\s"'&,;]+)/gi, '$1[redacted]')
     .slice(-limit);
 }
 
@@ -160,6 +160,7 @@ function healthOf(result, checkedAt) {
       name: clean(check?.name || 'check', 120),
       status: ['pass', 'fail', 'skip', 'unknown'].includes(check?.status) ? check.status : 'unknown',
       message: clean(check?.message, 1000),
+      ...(typeof check?.hint === 'string' && check.hint.trim() ? { hint: clean(check.hint, 1600) } : {}),
     })),
   };
 }
@@ -180,6 +181,7 @@ export class ComputerUseManager {
     this.log = '';
     this.discardingLogLine = false;
     this.healthDefinition = null;
+    this.restartReasons = new Set();
     this.value = {
       managerVersion: MANAGER_VERSION, runtimeVersion: 'unknown', platform: process.platform, checkedAt: null,
       configuredEnabled: false, configurationKnown: false, running: false, provider: null, toolCount: 0, status: 'unknown', reason: null,
@@ -187,6 +189,14 @@ export class ComputerUseManager {
       update: { status: 'unchecked', checkedAt: null, targetVersion: 'unknown', reason: null },
       health: null, operation: null, history: [], restartRequired: false,
     };
+  }
+
+  requireRestart(reason = 'repair', required = true) {
+    // A flag without a known cause must not be cleared by a successful reload.
+    if (this.value.restartRequired && !this.restartReasons.size) this.restartReasons.add('unknown');
+    if (required) this.restartReasons.add(reason);
+    else this.restartReasons.delete(reason);
+    this.value.restartRequired = this.restartReasons.size > 0;
   }
 
   runtime() {
@@ -256,10 +266,11 @@ export class ComputerUseManager {
       }
       return { runtimeVersion: version, platform: runtime.platform ?? process.platform, checkedAt: this.now(), configuredEnabled, configurationKnown, running, provider, toolCount, status, reason, packages };
     }).then(fresh => {
-      const packagesChanged = fresh.packages.some((pkg, index) => pkg.version !== this.value.packages[index].version);
+      const environmentChanged = fresh.runtimeVersion !== this.value.runtimeVersion || fresh.platform !== this.value.platform ||
+        fresh.packages.some((pkg, index) => ['version', 'targetVersion', 'compatible'].some(key => pkg[key] !== this.value.packages[index][key]));
       Object.assign(this.value, fresh);
-      this.value.update.targetVersion = fresh.runtimeVersion;
-      if (packagesChanged || (this.value.health?.overall !== 'unavailable' && (!fresh.running || service(this.ctx, 'tools')?.get(HEALTH_TOOL) !== this.healthDefinition))) this.value.health = null;
+      if (environmentChanged) this.value.update = { status: 'unchecked', checkedAt: null, targetVersion: fresh.runtimeVersion, reason: null };
+      if (environmentChanged || (this.value.health?.overall !== 'unavailable' && (!fresh.running || service(this.ctx, 'tools')?.get(HEALTH_TOOL) !== this.healthDefinition))) this.value.health = null;
     }).catch(error => {
       this.value.checkedAt = this.now();
       this.value.running = false;
@@ -418,12 +429,12 @@ export class ComputerUseManager {
       try { await this.revokeEnablement(runtime, ownership); }
       catch (recoveryError) {
         this.append('Enablement recovery: ' + clean(recoveryError) + '\n');
-        this.value.restartRequired = true;
+        this.requireRestart();
       }
       throw error;
     }
     this.value.health = null;
-    this.value.restartRequired ||= restartRequired;
+    if (restartRequired) this.requireRestart('enablement');
     return { restartRequired, message: restartRequired ? 'Enablement saved; restart DSH to apply it.' : enabled ? 'Computer use enabled.' : 'Computer use disabled.' };
   }
 
@@ -443,6 +454,9 @@ export class ComputerUseManager {
       if (manifest?.name !== spec.name || manifest.version !== version || !runtime.compatible(manifest, version)) throw fail('The registry did not provide the exact compatible ' + spec.name + '@' + version + '.', 'unavailable');
     }
     await this.refresh();
+    if (runtime.version() !== version || this.value.runtimeVersion !== version || this.value.status === 'unknown') {
+      throw fail('The running DSH environment changed or could not be verified; check compatible components again.');
+    }
     const current = this.value.packages.every(pkg => pkg.version === version && pkg.compatible);
     this.value.update = { status: current ? 'current' : 'available', checkedAt: this.now(), targetVersion: version, reason: null };
     return { message: current ? 'All computer-use packages match the running DSH version.' : 'Runtime-matching computer-use packages are available.' };
@@ -450,7 +464,7 @@ export class ComputerUseManager {
 
   async reconcile(signal, requiredIds = []) {
     const hmr = service(this.ctx, 'hmr');
-    if (!hmr) { this.value.restartRequired = true; return true; }
+    if (!hmr) { this.requireRestart('hmr'); return true; }
     signal.throwIfAborted();
     if (this.disposed) throw fail('The computer-use manager is disposed.', 'disposed');
     const result = await hmr.runExclusive(async () => {
@@ -458,10 +472,30 @@ export class ComputerUseManager {
       if (this.disposed) throw fail('The computer-use manager is disposed.', 'disposed');
       return hmr.reconcileProfile(requiredIds);
     });
-    const restartRequired = Boolean(result?.restartReason || result?.pending?.length);
-    for (const warning of result?.warnings ?? []) this.append(clean(typeof warning === 'string' ? warning : warning.message || JSON.stringify(warning)) + '\n');
-    this.value.restartRequired ||= restartRequired;
+    if (!result || !Array.isArray(result.pending) || !Array.isArray(result.warnings)) {
+      this.requireRestart();
+      throw fail('The host returned an invalid profile reconciliation result; restart requirements remain unresolved.');
+    }
+    const restartRequired = Boolean(result.restartReason || result.pending.length);
+    for (const warning of result.warnings) this.append(clean(typeof warning === 'string' ? warning : warning.message || JSON.stringify(warning)) + '\n');
+    this.requireRestart('hmr', restartRequired);
     return restartRequired;
+  }
+
+  async retryReconciliation(runtime, signal) {
+    if (!this.value.restartRequired || !this.restartReasons.size ||
+        [...this.restartReasons].some(reason => !['hmr', 'enablement'].includes(reason)) || !service(this.ctx, 'hmr')) return;
+    return runtime.lock(this.ctx, async () => {
+      signal.throwIfAborted();
+      if (this.disposed) throw fail('The computer-use manager is disposed.', 'disposed');
+      const required = this.savedEnablement(runtime).filter(row => row.enabled).map(row => row.spec.id);
+      const pending = await this.reconcile(signal, required);
+      await this.refresh(true);
+      signal.throwIfAborted();
+      if (!pending && this.value.configurationKnown && this.value.configuredEnabled && this.value.running &&
+          this.value.packages.every(pkg => pkg.compatible)) this.requireRestart('enablement', false);
+      return !pending;
+    }, signal);
   }
 
   async update(runtime, signal) {
@@ -504,7 +538,7 @@ export class ComputerUseManager {
         return { restartRequired, message: restartRequired ? 'Runtime-matching packages installed; restart DSH to load pending changes.' : 'Runtime-matching computer-use packages installed and reconciled.' };
       } catch (error) {
         if (!ownsSettledRun) {
-          this.value.restartRequired = true;
+          this.requireRestart();
           throw fail(clean(error) + ' No settled package-writer ownership was confirmed; no profile metadata was restored. Inspect and repair the profile through the official plugin manager before retrying.');
         }
         this.value.operation.message = 'Recovering the previous profile metadata and dependencies.';
@@ -528,20 +562,20 @@ export class ComputerUseManager {
           }
           // Unload may itself hold the HMR queue. Only finish our package cleanup here.
           if (!this.disposed) await this.reconcile(recovery.signal, requiredIds());
-          else this.value.restartRequired = true;
+          else this.requireRestart();
           restored = true;
         } catch (recoveryError) {
-          this.value.restartRequired = true;
+          this.requireRestart();
           this.append('Recovery failed: ' + clean(recoveryError) + '\n');
         } finally {
           clearTimeout(timer);
           // Each repair is a new writer: never reuse the first run's settlement proof.
           if (metadataRestoreSafe) {
             try { await runtime.restore(this.ctx, saved); }
-            catch (restoreError) { restored = false; this.value.restartRequired = true; this.append('Metadata recovery failed: ' + clean(restoreError) + '\n'); }
+            catch (restoreError) { restored = false; this.requireRestart(); this.append('Metadata recovery failed: ' + clean(restoreError) + '\n'); }
           } else {
             restored = false;
-            this.value.restartRequired = true;
+            this.requireRestart();
             this.append('Metadata recovery skipped: the repair writer did not confirm settlement.\n');
           }
         }
@@ -595,21 +629,21 @@ export class ComputerUseManager {
     // No CAS exists: same-value ABA changes cannot be identified. Never re-grant a
     // previously enabled capability, and preserve all observed conflicting changes.
     if (!ownership.grants.length || ownership.conflicted) return;
-    if (this.disposed) { this.value.restartRequired = true; return; }
+    if (this.disposed) { this.requireRestart(); return; }
     try { this.verifyEnablementOwnership(runtime, ownership); }
     catch { return; }
     const manager = service(this.ctx, 'pluginManager');
     this.activationPhase('enabling', 'Revoking capability grants made by this operation.');
     for (const spec of [...ownership.grants].reverse()) {
-      if (this.disposed) { this.value.restartRequired = true; return; }
+      if (this.disposed) { this.requireRestart(); return; }
       const rows = await this.readWithin(() => manager.listPlugins());
-      if (this.disposed) { this.value.restartRequired = true; return; }
+      if (this.disposed) { this.requireRestart(); return; }
       try { this.verifyEnablementOwnership(runtime, ownership); }
       catch { return; }
       const row = this.row(rows, spec);
       if (!row || row.readOnlyReason) throw fail('The persistent ' + spec.id + ' row cannot be revoked.');
       const result = await manager.setPluginEnabled(row.entryId, false);
-      if (result.application === 'restart-required') this.value.restartRequired = true;
+      if (result.application === 'restart-required') this.requireRestart();
       else if (result.application !== 'applied') throw fail('Enablement recovery was ' + result.application + '.');
       ownership.expected.find(item => item.spec.id === spec.id).enabled = false;
       ownership.grants = ownership.grants.filter(item => item.id !== spec.id);
@@ -657,6 +691,7 @@ export class ComputerUseManager {
     }
     try {
       this.value.health = null;
+      const reconciled = await this.retryReconciliation(runtime, signal);
       let restartRequired = false;
       if (approved) {
         this.activationPhase('installing', 'Installing runtime-matching computer-use packages.');
@@ -668,6 +703,11 @@ export class ComputerUseManager {
       this.verifyEnablementOwnership(runtime, ownership);
       this.activationPhase('enabling', 'Enabling computer use.');
       const enabled = await this.setEnabled(runtime, true, signal, { activation: true, pendingRestart: restartRequired, ownership });
+      if (reconciled && !restartRequired && !enabled.restartRequired && this.restartReasons.has('enablement')) {
+        this.activationPhase('waiting', 'Waiting for the native provider.');
+        await this.waitUntilReady(runtime, version, signal);
+        this.requireRestart('enablement', false);
+      }
       restartRequired ||= enabled.restartRequired || this.value.restartRequired;
       signal.throwIfAborted();
       this.verifyActivationConfiguration(runtime);
@@ -689,7 +729,7 @@ export class ComputerUseManager {
     } catch (error) {
       try { await this.revokeEnablement(runtime, ownership); }
       catch (recoveryError) {
-        this.value.restartRequired = true;
+        this.requireRestart();
         this.append('Activation recovery failed: ' + clean(recoveryError) + '\n');
         throw fail(clean(error) + ' Capability-grant recovery is incomplete; restart and profile repair are required.');
       }
@@ -716,6 +756,6 @@ export class ComputerUseManager {
     // An official toggle or reconciliation may be queued behind this disposer.
     // Those uncancellable calls retain their own lock/settlement; joining them here
     // deadlocks the host queue. No continuation may enqueue more HMR or toggle work.
-    if (this.pending) this.value.restartRequired = true;
+    if (this.pending) this.requireRestart();
   }
 }

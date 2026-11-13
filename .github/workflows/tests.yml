@@ -19,5 +19,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Run isolated host and API tests
-        run: node --test core.test.js api.test.js
+      - name: Run host, API and package contract tests
+        run: npm test

@@ -66,6 +66,7 @@ try {
     await page.getByRole('button', { name: '运行自检', exact: true }).click();
     await tick(page);
     await expect(page.getByText('screen_capture_capability', { exact: true })).toBeVisible();
+    await expect(page.getByText('ax_capability', { exact: true })).toBeVisible();
     await page.getByRole('switch').click();
     await expect(page.getByRole('dialog')).toContainText('停用会影响当前配置下的所有会话');
     await page.getByRole('dialog').locator('[data-modal-autofocus]').click();
@@ -95,7 +96,7 @@ try {
     const page = await scenario({ scenario: 'missing' });
     await pending(page);
     const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText('0.2.2-rc.1');
+    await expect(dialog).toContainText('0.2.2-rc.2');
     await expect(dialog).toContainText('当前配置下的所有会话');
     for (const name of packageNames) await expect(dialog).toContainText(name);
     let result = await stats(page);
@@ -171,6 +172,7 @@ try {
     await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByText('需关注', { exact: true }).first()).toBeVisible();
     await expect(page.getByText(outcome === 'warning' ? '部分异常' : '自检不可用', { exact: true })).toBeVisible();
+    if (outcome === 'warning') await expect(page.getByText('Check the fixture accessibility configuration.', { exact: true })).toBeVisible();
     const result = await stats(page);
     assert.equal(result.state.operation.status, 'warning');
     assert.equal(result.state.running, true);
@@ -238,7 +240,7 @@ try {
     await pending(page);
     const dialog = page.getByRole('dialog');
     await expect(dialog).toContainText(packageNames[1]);
-    await expect(dialog).toContainText('0.2.2-rc.1');
+    await expect(dialog).toContainText('0.2.2-rc.2');
     if (language === 'en') await expect(dialog).toContainText('every session in the current profile');
     const geometry = await dialog.evaluate(element => { const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right, width: rect.width, viewport: innerWidth, overflowing: element.scrollWidth > element.clientWidth }; });
     assert.ok(geometry.left >= 0 && geometry.right <= geometry.viewport, JSON.stringify(geometry));

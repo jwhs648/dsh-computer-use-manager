@@ -1,17 +1,17 @@
 {
   "name": "@local/dsh-computer-use-manager",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "private": true,
   "license": "MIT",
   "type": "module",
   "description": "Computer-use capability manager for DeepSeek Harness: guided activation, matching component installation and read-only health checks.",
   "engines": {
-    "dsh": "0.2.2-rc.1"
+    "dsh": "0.2.2-rc.2"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-app-boot": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-plugin-manager": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-atomic-write": "0.2.2-rc.1"
+    "@deepseek-ai/dsh-app-boot": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-plugin-manager": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-atomic-write": "0.2.2-rc.2"
   },
   "exports": {
     ".": "./index.js",

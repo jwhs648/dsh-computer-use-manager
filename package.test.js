@@ -7,8 +7,11 @@ const json = async path => JSON.parse(await readFile(new URL(path, root), 'utf8'
 
 test('the bundle ships its runtime, display resources and third-party notices', async () => {
   const manifest = await json('package.json');
-  assert.equal(manifest.version, '0.1.0-alpha.2');
-  assert.equal(manifest.engines.dsh, '0.2.2-rc.1');
+  assert.equal(manifest.version, '0.1.0-alpha.3');
+  assert.equal(manifest.engines.dsh, '0.2.2-rc.2');
+  for (const name of ['@deepseek-ai/dsh-app-boot', '@deepseek-ai/dsh-plugin-manager', '@deepseek-ai/dsh-atomic-write']) {
+    assert.equal(manifest.peerDependencies[name], '0.2.2-rc.2', 'Host peer must match the declared DSH version: ' + name);
+  }
   assert.equal(manifest.exports['./icon'], './icon.svg');
   for (const name of ['index.js', 'core.js', 'api.js', 'client.js', 'cordis.patch.yml', 'icon.svg', 'THIRD_PARTY_NOTICES.md']) {
     assert.ok(manifest.files.includes(name), 'Missing distribution file: ' + name);
