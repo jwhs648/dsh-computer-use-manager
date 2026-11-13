@@ -6,7 +6,7 @@ import { lstat } from 'node:fs/promises';
 // This layout is verified against the shipped operations implementation, not a public admission API.
 export async function admitProfileUpdate(dir, version, signal) {
   signal.throwIfAborted();
-  if (version !== '0.2.2-rc.2') throw fail('Package updates require a reviewed DSH package-operation admission contract.', 'unavailable');
+  if (version !== '0.2.2-rc.3') throw fail('Package updates require a reviewed DSH package-operation admission contract.', 'unavailable');
   try {
     await lstat(join(dir, '.plugin-manager', 'run.json'));
   } catch (error) {
@@ -17,7 +17,7 @@ export async function admitProfileUpdate(dir, version, signal) {
   throw fail('A previous package-operation record exists. Use the official plugin manager to settle or inspect it before retrying; no profile snapshot was taken.', 'unavailable');
 }
 
-const MANAGER_VERSION = '0.1.0-alpha.3';
+const MANAGER_VERSION = '0.1.0-alpha.4';
 const PROVIDER = 'cua-driver-native';
 const PREFIX = 'cua_driver_native__';
 const HEALTH_TOOL = PREFIX + 'health_report';

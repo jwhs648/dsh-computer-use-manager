@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const VERSION = '0.2.2-rc.2';
+const VERSION = '0.2.2-rc.3';
 const NAMES = ['@deepseek-ai/dsh-computer-use', '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native', '@deepseek-ai/dsh-mcp-client'];
 const IDS = ['computer-use', 'computer-use-cua-driver-native'];
 const HEALTH = 'cua_driver_native__health_report';
@@ -137,7 +137,7 @@ test('component checks and health expire when versions or compatibility change',
     await perform(f.manager, 'checkUpdates');
     await perform(f.manager, 'health');
     assert.equal(f.manager.snapshot().update.status, 'current');
-    if (kind === 'version') f.manifests.get(NAMES[1]).version = '0.2.2-rc.1';
+    if (kind === 'version') f.manifests.get(NAMES[1]).version = '0.2.2-rc.2';
     if (kind === 'compatibility') f.manifests.get(NAMES[1]).compatible = false;
     if (kind === 'missing') f.manifests.delete(NAMES[1]);
     if (kind === 'runtime') f.runtime.version = () => '0.2.3';
@@ -303,7 +303,7 @@ test('registry lookup failures preserve safe JSON stdout, exit codes and timeout
 test('loads without host peers and returns detached exact-version runtime state', async () => {
   const f = fixture();
   const state = await f.manager.state();
-  assert.equal(state.managerVersion, '0.1.0-alpha.3');
+  assert.equal(state.managerVersion, '0.1.0-alpha.4');
   assert.equal(state.runtimeVersion, VERSION);
   assert.equal(state.platform, 'win32');
   assert.equal(state.status, 'running');
@@ -1329,7 +1329,9 @@ test('production admission rejects every existing run record without reading or 
   const signal = new AbortController().signal;
   try {
     await admitProfileUpdate(dir, VERSION, signal);
-    await assert.rejects(admitProfileUpdate(dir, '0.2.3', signal), /reviewed DSH/);
+    for (const unsupported of ['0.2.2-rc.2', '0.2.2-rc.4', '0.2.3']) {
+      await assert.rejects(admitProfileUpdate(dir, unsupported, signal), /reviewed DSH/);
+    }
     await mkdir(join(dir, '.plugin-manager'));
     for (const text of ['not-json', JSON.stringify({ pid: process.pid, grouped: false }), JSON.stringify({ pid: 999999999, grouped: true })]) {
       await t.test(text, async () => {

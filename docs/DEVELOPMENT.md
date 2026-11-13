@@ -1,8 +1,9 @@
 # Developer notes
 
 A local DSH bundle for the Windows native Cua Driver provider. The manager
-remains available independently of the optional driver. Version 0.1.0-alpha.3
-targets Windows x64 with DSH Desktop 0.2.2-rc.2 and its matching Host peers.
+remains available independently of the optional driver. Version 0.1.0-alpha.4
+targets Windows x64 with DSH Desktop 0.2.2-rc.3 and its matching Host peers.
+Version 0.1.0-alpha.3 targets rc.2; it is outside this release's declared range.
 Version 0.1.0-alpha.2 was published on GitHub on 2026-11-07 for rc.1; rc.1
 is outside this release's declared compatibility range.
 
@@ -49,7 +50,7 @@ have `configuredEnabled: true` while the current provider is not running.
 
 ## Package-operation admission
 
-This version declares only DSH 0.2.2-rc.2 and the matching Host peers. The
+This version declares only DSH 0.2.2-rc.3 and the matching Host peers. The
 production admission adapter depends on the host package-operation layout;
 it is not a claimed public cross-version admission API.
 

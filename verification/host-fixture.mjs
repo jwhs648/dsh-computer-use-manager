@@ -3,7 +3,7 @@ import { ComputerUseManager } from '../core.js';
 import { createApiHandler } from '../api.js';
 
 export const packageNames = ['@deepseek-ai/dsh-computer-use', '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native', '@deepseek-ai/dsh-mcp-client'];
-export const version = '0.2.2-rc.2';
+export const version = '0.2.2-rc.3';
 const specs = packageNames.slice(0, 2).map((name, index) => ({ name, id: ['computer-use', 'computer-use-cua-driver-native'][index] }));
 
 // Only the Host boundaries are fake. The manager and HTTP handler are production code.

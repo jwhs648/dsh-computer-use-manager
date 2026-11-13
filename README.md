@@ -8,9 +8,9 @@
 
 A community activation and management UI for DSH's existing computer-use capability, not a separate computer-control engine. 非 DeepSeek 或 Cua 官方发行组件。
 
-当前预发布版本：[`0.1.0-alpha.3`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.3)，适配 DSH Desktop `0.2.2-rc.2`。
+当前预发布版本：[`0.1.0-alpha.4`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.4)，适配 DSH Desktop `0.2.2-rc.3`。
 
-> 本版声明范围为 Windows x64 + DSH Desktop `0.2.2-rc.2`，旧版 `0.2.2-rc.1` 不在本版声明范围内。`0.1.0-alpha.1` 存在热重载等待、取消恢复和遗留安装进程处理缺陷，不建议继续分发；[`0.1.0-alpha.2`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.2) 已于 2026-11-07 发布，面向 `0.2.2-rc.1`。
+> 本版声明范围为 Windows x64 + DSH Desktop `0.2.2-rc.3`，旧版 `rc.2` 和 `rc.1` 不在本版声明范围内；`rc.2` 对应 [`alpha.3`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.3)。`0.1.0-alpha.1` 存在热重载等待、取消恢复和遗留安装进程处理缺陷，不建议继续分发；[`0.1.0-alpha.2`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.2) 已于 2026-11-07 发布，面向 `0.2.2-rc.1`。
 
 [更新记录](CHANGELOG.md) · [开发者说明](docs/DEVELOPMENT.md) · [问题反馈](https://github.com/jwhs648/dsh-computer-use-manager/issues)
 
@@ -67,12 +67,12 @@ A community activation and management UI for DSH's existing computer-use capabil
 3. 阅读第三方插件信任提示并安装，然后启用管理插件。
 4. 进入侧栏的 **电脑操作能力**，按需要打开开关；组件缺失时，确认安装并等待自检。
 
-下载修复包：[`dsh-computer-use-manager-0.1.0-alpha.3.tgz`](https://github.com/jwhs648/dsh-computer-use-manager/releases/download/v0.1.0-alpha.3/dsh-computer-use-manager-0.1.0-alpha.3.tgz)。同页提供 SHA-256 校验文件，安装前核对版本和校验和。旧版发行包的兼容范围不同。
+下载修复包：[`dsh-computer-use-manager-0.1.0-alpha.4.tgz`](https://github.com/jwhs648/dsh-computer-use-manager/releases/download/v0.1.0-alpha.4/dsh-computer-use-manager-0.1.0-alpha.4.tgz)。同页提供 SHA-256 校验文件，安装前核对版本和校验和。旧版发行包的兼容范围不同。
 
 也可以安装本地源码目录。使用 Desktop 安装的 `dsh` 命令；为确保变更完整应用，先退出 DSH，执行后再打开：
 
 ```powershell
-dsh plugin --profile desktop add "C:\path\to\dsh-computer-use-manager-0.1.0-alpha.3.tgz"
+dsh plugin --profile desktop add "C:\path\to\dsh-computer-use-manager-0.1.0-alpha.4.tgz"
 ```
 
 远程浏览器电脑上的文件路径不能直接用于 DSH 主机。首次选择本插件不会自动开启电脑操作驱动，两个可选底层组件默认关闭。替换已安装的 Host 代码可能需要重启；刷新页面本身不能替代宿主重启。
@@ -86,7 +86,7 @@ dsh plugin --profile desktop add "C:\path\to\dsh-computer-use-manager-0.1.0-alph
 - 本地组件已兼容时，跳过联网查询与下载。
 - 缺失或不兼容时，先验证当前 DSH 的匹配版本，再请求安装确认；确认五分钟有效、仅可使用一次。
 - 安装、启动、需要重启和自检异常分别报告，不会一律显示为成功。
-- 组件或当前 DSH 版本、兼容条件改变时，旧组件检查结果会失效；需要重新检查后再安装匹配版本。
+- 组件或当前 DSH 版本、兼容条件改变时，旧组件检查结果会失效；需要重新检查后再安装匹配版本。宿主升级到 rc.3 后，原 rc.2 官方组件也需在管理页检查并更新为 rc.3。
 - 已确认的 HMR 等待条件消除后，会清除相应重启提示；仅观察到运行正常，不会抹掉未知的重启或修复原因。
 - 取消或失败恢复不得把能力从关闭重新开启。已观察到的其他配置变化应保留；没有跨客户端原子事务或同值变更检测保证。
 - 关闭管理页面不会取消已确认的 Host 操作；卸载插件则停止接收请求并取消其拥有的工作，不等待可能反向依赖卸载的 HMR 队列。已经交给官方管理器、无法取消的写入可能在卸载后完成，该实例不会继续排入新的变更。
@@ -104,8 +104,8 @@ dsh plugin --profile desktop add "C:\path\to\dsh-computer-use-manager-0.1.0-alph
 
 | 项目 | 范围 |
 | --- | --- |
-| 本版目标宿主 | Windows x64、DSH Desktop `0.2.2-rc.2` |
-| 声明范围 | 精确 `0.2.2-rc.2`；旧 `rc.1` 不在本版范围内 |
+| 本版目标宿主 | Windows x64、DSH Desktop `0.2.2-rc.3` |
+| 声明范围 | 精确 `0.2.2-rc.3`；旧 `rc.2` / `rc.1` 不在本版范围内 |
 | 原生驱动 | Cua Driver Native，组件版本与 DSH 匹配 |
 | 后台回归 | 包括串行 HMR 队列、取消与新停用交错、遗留安装记录、安装所有权边界 |
 | 浏览器回归 | 真实插件自有控件；后台使用隔离适配器，不能代替实机集成 |

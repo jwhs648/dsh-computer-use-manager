@@ -96,7 +96,7 @@ try {
     const page = await scenario({ scenario: 'missing' });
     await pending(page);
     const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText('0.2.2-rc.2');
+    await expect(dialog).toContainText('0.2.2-rc.3');
     await expect(dialog).toContainText('当前配置下的所有会话');
     for (const name of packageNames) await expect(dialog).toContainText(name);
     let result = await stats(page);
@@ -240,7 +240,7 @@ try {
     await pending(page);
     const dialog = page.getByRole('dialog');
     await expect(dialog).toContainText(packageNames[1]);
-    await expect(dialog).toContainText('0.2.2-rc.2');
+    await expect(dialog).toContainText('0.2.2-rc.3');
     if (language === 'en') await expect(dialog).toContainText('every session in the current profile');
     const geometry = await dialog.evaluate(element => { const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right, width: rect.width, viewport: innerWidth, overflowing: element.scrollWidth > element.clientWidth }; });
     assert.ok(geometry.left >= 0 && geometry.right <= geometry.viewport, JSON.stringify(geometry));
