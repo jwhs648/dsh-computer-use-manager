@@ -3,10 +3,16 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { lstat } from 'node:fs/promises';
 
+const inlineInstallSupported = version => version === '0.2.2-rc.3';
+
+function requireInlineInstall(version) {
+  if (!inlineInstallSupported(version)) throw fail('Inline installation requires a reviewed DSH package-operation contract. Follow the manager setup instructions to install missing components with the dsh plugin CLI or repair mismatched bundled components in DSH. Restart DSH and activate again.', 'manual_install_required');
+}
+
 // This layout is verified against the shipped operations implementation, not a public admission API.
 export async function admitProfileUpdate(dir, version, signal) {
   signal.throwIfAborted();
-  if (version !== '0.2.2-rc.3') throw fail('Package updates require a reviewed DSH package-operation admission contract.', 'unavailable');
+  requireInlineInstall(version);
   try {
     await lstat(join(dir, '.plugin-manager', 'run.json'));
   } catch (error) {
@@ -17,7 +23,7 @@ export async function admitProfileUpdate(dir, version, signal) {
   throw fail('A previous package-operation record exists. Use the official plugin manager to settle or inspect it before retrying; no profile snapshot was taken.', 'unavailable');
 }
 
-const MANAGER_VERSION = '0.1.0-alpha.4';
+const MANAGER_VERSION = '0.1.0-alpha.5';
 const PROVIDER = 'cua-driver-native';
 const PREFIX = 'cua_driver_native__';
 const HEALTH_TOOL = PREFIX + 'health_report';
@@ -90,8 +96,8 @@ export async function runProfilePackages(operations, profile, manager, args, { s
 // Host peers are resolved by DSH, never imported while isolated Node tests load this module.
 async function productionRuntime() {
   const boot = await import('@deepseek-ai/dsh-app-boot');
-  const operations = await import('@deepseek-ai/dsh-plugin-manager/operations');
-  const atomic = await import('@deepseek-ai/dsh-atomic-write');
+  const operations = () => import('@deepseek-ai/dsh-plugin-manager/operations');
+  const atomic = () => import('@deepseek-ai/dsh-atomic-write');
   const fs = await import('node:fs/promises');
   const profileOf = ctx => {
     const profile = service(ctx, 'profileContext');
@@ -112,10 +118,10 @@ async function productionRuntime() {
       return boot.readProfileManifest('dsh', dir);
     },
     compatible: (manifest, version) => boot.evaluatePluginCompatibility(manifest, {}, version) === undefined,
-    lookup: (ctx, name, version, signal) => operations.viewProfilePackage(profileOf(ctx).dir, name + '@' + version, {
+    lookup: async (ctx, name, version, signal) => (await operations()).viewProfilePackage(profileOf(ctx).dir, name + '@' + version, {
       ...packageManager(ctx), fields: ['name', 'version', 'engines', 'peerDependencies'], timeoutMs: 20000, signal,
     }),
-    lock: (ctx, callback, signal) => atomic.withFileLock(join(profileOf(ctx).dir, 'package.json'), callback, { waitMs: 120000, signal }),
+    lock: async (ctx, callback, signal) => (await atomic()).withFileLock(join(profileOf(ctx).dir, 'package.json'), callback, { waitMs: 120000, signal }),
     admit: (ctx, signal) => admitProfileUpdate(profileOf(ctx).dir, boot.getDshRuntimeVersion(), signal),
     backup: async ctx => {
       const profile = profileOf(ctx);
@@ -136,10 +142,10 @@ async function productionRuntime() {
     restore: async (_ctx, saved) => {
       for (const file of saved) {
         if (file.text === null) await fs.rm(file.path, { force: true });
-        else await atomic.writeFileAtomic(file.path, file.text, { mode: 0o600 });
+        else await (await atomic()).writeFileAtomic(file.path, file.text, { mode: 0o600 });
       }
     },
-    run: (ctx, args, execution) => runProfilePackages(operations, profileOf(ctx), packageManager(ctx), args, execution),
+    run: async (ctx, args, execution) => runProfilePackages(await operations(), profileOf(ctx), packageManager(ctx), args, execution),
   };
 }
 
@@ -183,7 +189,7 @@ export class ComputerUseManager {
     this.healthDefinition = null;
     this.restartReasons = new Set();
     this.value = {
-      managerVersion: MANAGER_VERSION, runtimeVersion: 'unknown', platform: process.platform, checkedAt: null,
+      managerVersion: MANAGER_VERSION, runtimeVersion: 'unknown', inlineInstallSupported: false, platform: process.platform, checkedAt: null,
       configuredEnabled: false, configurationKnown: false, running: false, provider: null, toolCount: 0, status: 'unknown', reason: null,
       packages: PACKAGES.map(({ name, label }) => ({ name, label, version: null, targetVersion: 'unknown', compatible: false })),
       update: { status: 'unchecked', checkedAt: null, targetVersion: 'unknown', reason: null },
@@ -264,7 +270,7 @@ export class ComputerUseManager {
       } else if (running) {
         status = 'running'; reason = null;
       }
-      return { runtimeVersion: version, platform: runtime.platform ?? process.platform, checkedAt: this.now(), configuredEnabled, configurationKnown, running, provider, toolCount, status, reason, packages };
+      return { runtimeVersion: version, inlineInstallSupported: inlineInstallSupported(version), platform: runtime.platform ?? process.platform, checkedAt: this.now(), configuredEnabled, configurationKnown, running, provider, toolCount, status, reason, packages };
     }).then(fresh => {
       const environmentChanged = fresh.runtimeVersion !== this.value.runtimeVersion || fresh.platform !== this.value.platform ||
         fresh.packages.some((pkg, index) => ['version', 'targetVersion', 'compatible'].some(key => pkg[key] !== this.value.packages[index][key]));
@@ -273,6 +279,7 @@ export class ComputerUseManager {
       if (environmentChanged || (this.value.health?.overall !== 'unavailable' && (!fresh.running || service(this.ctx, 'tools')?.get(HEALTH_TOOL) !== this.healthDefinition))) this.value.health = null;
     }).catch(error => {
       this.value.checkedAt = this.now();
+      this.value.inlineInstallSupported = false;
       this.value.running = false;
       this.value.status = 'unknown';
       this.value.configurationKnown = false;
@@ -343,9 +350,9 @@ export class ComputerUseManager {
       operation.message = clean(error);
       if (action === 'activate') this.#activationApproval = null;
       const activationUpdateFailed = action === 'activate' && (operation.phase === 'installing' || (operation.phase === 'checking' && this.value.update.status === 'checking'));
-      if (error.code === 'configuration_changed') operation.code = 'configuration_changed';
+      if (['configuration_changed', 'manual_install_required'].includes(error.code)) operation.code = error.code;
       if (action === 'checkUpdates' || action === 'update' || activationUpdateFailed) {
-        this.value.update.status = error.code === 'unavailable' ? 'unavailable' : 'error';
+        this.value.update.status = ['unavailable', 'manual_install_required'].includes(error.code) ? 'unavailable' : 'error';
         this.value.update.checkedAt = this.now();
         this.value.update.reason = clean(error);
       }
@@ -379,7 +386,7 @@ export class ComputerUseManager {
   }
 
   async setEnabled(runtime, enabled, signal, options = {}) {
-    if (enabled && this.value.packages.some(pkg => !pkg.compatible)) throw fail('Install compatible runtime-matching packages before enabling computer use.');
+    if (enabled && !this.locallyCompatible(runtime, runtime.version())) throw fail('Install compatible runtime-matching packages before enabling computer use.');
     const ownership = options.ownership ?? { expected: this.savedEnablement(runtime), grants: [], conflicted: false };
     const manager = service(this.ctx, 'pluginManager');
     const specs = enabled ? PACKAGES.slice(0, 2) : PACKAGES.slice(0, 2).reverse();
@@ -483,11 +490,12 @@ export class ComputerUseManager {
   }
 
   async retryReconciliation(runtime, signal) {
-    if (!this.value.restartRequired || !this.restartReasons.size ||
+    if (!inlineInstallSupported(runtime.version()) || !this.value.restartRequired || !this.restartReasons.size ||
         [...this.restartReasons].some(reason => !['hmr', 'enablement'].includes(reason)) || !service(this.ctx, 'hmr')) return;
     return runtime.lock(this.ctx, async () => {
       signal.throwIfAborted();
       if (this.disposed) throw fail('The computer-use manager is disposed.', 'disposed');
+      if (!inlineInstallSupported(runtime.version())) return;
       const required = this.savedEnablement(runtime).filter(row => row.enabled).map(row => row.spec.id);
       const pending = await this.reconcile(signal, required);
       await this.refresh(true);
@@ -499,12 +507,15 @@ export class ComputerUseManager {
   }
 
   async update(runtime, signal) {
-    await this.checkUpdates(runtime, signal);
     const version = runtime.version();
+    requireInlineInstall(version);
+    await this.checkUpdates(runtime, signal);
+    requireInlineInstall(runtime.version());
     this.value.operation.message = 'Installing computer-use packages matching DSH ' + version + '.';
     return runtime.lock(this.ctx, async () => {
       signal.throwIfAborted();
       if (this.disposed) throw fail('The computer-use manager is disposed.', 'disposed');
+      requireInlineInstall(runtime.version());
       if (typeof runtime.admit !== 'function') throw fail('No safe package-operation admission contract is available.', 'unavailable');
       await runtime.admit(this.ctx, signal);
       signal.throwIfAborted();
@@ -512,10 +523,12 @@ export class ComputerUseManager {
         const configured = runtime.configured(this.ctx);
         return PACKAGES.slice(0, 2).filter(spec => configured.some(row => row.id === spec.id && row.name === spec.name && row.configuredEnabled === true)).map(spec => spec.id);
       };
+      requireInlineInstall(runtime.version());
       const saved = await runtime.backup(this.ctx);
       const before = PACKAGES.map(spec => {
         try { return runtime.manifest(this.ctx, spec.name)?.version ?? null; } catch { return null; }
       });
+      requireInlineInstall(runtime.version());
       let ownsSettledRun = false;
       try {
         signal.throwIfAborted();
@@ -529,6 +542,7 @@ export class ComputerUseManager {
           const manifest = runtime.manifest(this.ctx, spec.name);
           if (manifest.name !== spec.name || manifest.version !== version || !runtime.compatible(manifest, version)) throw fail('Installed package validation failed for ' + spec.name + '.');
         }
+        requireInlineInstall(runtime.version());
         const required = requiredIds();
         const restartRequired = await this.reconcile(signal, required);
         await this.refresh(true);
@@ -547,9 +561,11 @@ export class ComputerUseManager {
         let restored = false;
         let metadataRestoreSafe = true;
         try {
+          requireInlineInstall(runtime.version());
           await runtime.restore(this.ctx, saved);
           const hadLock = saved.some(file => file.path.endsWith('pnpm-lock.yaml') && file.text !== null);
           metadataRestoreSafe = false;
+          requireInlineInstall(runtime.version());
           const repair = await runtime.run(this.ctx, ['install', hadLock ? '--frozen-lockfile' : '--config.lockfile=false', '--ignore-scripts'], { signal: recovery.signal, onOutput: text => this.append(text), onSettled: () => { metadataRestoreSafe = true; } });
           this.append(repair.output || '');
           if (!metadataRestoreSafe) throw fail('The repair package writer did not confirm settlement.');
@@ -561,6 +577,7 @@ export class ComputerUseManager {
             if (version !== before[index]) throw fail('The previous package versions could not be verified.');
           }
           // Unload may itself hold the HMR queue. Only finish our package cleanup here.
+          requireInlineInstall(runtime.version());
           if (!this.disposed) await this.reconcile(recovery.signal, requiredIds());
           else this.requireRestart();
           restored = true;
@@ -571,7 +588,7 @@ export class ComputerUseManager {
           clearTimeout(timer);
           // Each repair is a new writer: never reuse the first run's settlement proof.
           if (metadataRestoreSafe) {
-            try { await runtime.restore(this.ctx, saved); }
+            try { requireInlineInstall(runtime.version()); await runtime.restore(this.ctx, saved); }
             catch (restoreError) { restored = false; this.requireRestart(); this.append('Metadata recovery failed: ' + clean(restoreError) + '\n'); }
           } else {
             restored = false;
@@ -679,8 +696,10 @@ export class ComputerUseManager {
       approved = true;
     }
     signal.throwIfAborted();
+    const needsInstall = !this.locallyCompatible(runtime, version);
+    if (needsInstall) requireInlineInstall(version);
     const ownership = { expected: this.savedEnablement(runtime), grants: [], conflicted: false };
-    if (!approved && !this.locallyCompatible(runtime, version)) {
+    if (!approved && needsInstall) {
       this.activationPhase('checking', 'Checking runtime-matching computer-use packages.');
       await this.checkUpdates(runtime, signal);
       signal.throwIfAborted();
@@ -693,7 +712,7 @@ export class ComputerUseManager {
       this.value.health = null;
       const reconciled = await this.retryReconciliation(runtime, signal);
       let restartRequired = false;
-      if (approved) {
+      if (approved && needsInstall) {
         this.activationPhase('installing', 'Installing runtime-matching computer-use packages.');
         const installed = await this.update(runtime, signal);
         restartRequired = installed.restartRequired;

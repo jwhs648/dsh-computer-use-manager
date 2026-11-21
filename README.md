@@ -4,13 +4,15 @@
 
 本插件不提供独立的电脑操作引擎，也不是为 DSH 另外实现一套 computer-use。它负责启用或停用 DSH 已有的能力、检查官方组件、查看运行状态和执行健康自检；实际桌面操作由 DSH 的官方 computer-use 组件及其 Cua Driver Native 提供方完成。
 
-“DSH 原有能力”不等于每个安装都已预装全部可选组件。若当前安装缺少所需组件，本插件只会在用户确认后补装与当前 DSH 版本匹配的官方组件，而不是安装自行实现的电脑操作引擎。
+“DSH 原有能力”不等于每个安装都已预装全部可选组件。若当前安装缺少组件，管理页会列出需要补齐的官方包。已核验安装流程的宿主支持确认后一键补装。
 
 A community activation and management UI for DSH's existing computer-use capability, not a separate computer-control engine. 非 DeepSeek 或 Cua 官方发行组件。
 
-当前预发布版本：[`0.1.0-alpha.4`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.4)，适配 DSH Desktop `0.2.2-rc.3`。
+当前源码版本为 `0.1.0-alpha.5`（本地预发布包）。下列下载链接指向历史发行版。
 
-> 本版声明范围为 Windows x64 + DSH Desktop `0.2.2-rc.3`，旧版 `rc.2` 和 `rc.1` 不在本版声明范围内；`rc.2` 对应 [`alpha.3`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.3)。`0.1.0-alpha.1` 存在热重载等待、取消恢复和遗留安装进程处理缺陷，不建议继续分发；[`0.1.0-alpha.2`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.2) 已于 2026-11-07 发布，面向 `0.2.2-rc.1`。
+上次发布版本：[`0.1.0-alpha.4`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.4)，适配 DSH Desktop `0.2.2-rc.3`。
+
+> alpha.4 声明范围为 Windows x64 + DSH Desktop `0.2.2-rc.3`，旧版 `rc.2` 和 `rc.1` 不在本版声明范围内；`rc.2` 对应 [`alpha.3`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.3)。`0.1.0-alpha.1` 存在热重载等待、取消恢复和遗留安装进程处理缺陷，不建议继续分发；[`0.1.0-alpha.2`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.2) 已于 2026-11-07 发布，面向 `0.2.2-rc.1`。
 
 [更新记录](CHANGELOG.md) · [开发者说明](docs/DEVELOPMENT.md) · [问题反馈](https://github.com/jwhs648/dsh-computer-use-manager/issues)
 
@@ -48,7 +50,7 @@ A community activation and management UI for DSH's existing computer-use capabil
 
 | 入口 | 行为 |
 | --- | --- |
-| 启用开关 | 检查本地组件；需要安装时请求确认，随后继续启用并自检 |
+| 启用开关 | 在本地检查组件，就绪后启用并自检；缺包时给出补齐方式 |
 | 运行状态 | 区分保存的配置、实际工具提供方、可用工具和需要重启的状态 |
 | 检查兼容组件 | 查询与当前 DSH 精确匹配的官方组件，不是最新版检测 |
 | 安装匹配版本 | 只安装固定的三个组件，不接受任意包名或版本 |
@@ -65,14 +67,14 @@ A community activation and management UI for DSH's existing computer-use capabil
 1. 在 DSH Desktop 打开 **插件 → 添加插件**。
 2. 将本地修复包在 **DSH 所在机器** 上的绝对路径填入 **包名或地址**，不要添加引号。
 3. 阅读第三方插件信任提示并安装，然后启用管理插件。
-4. 进入侧栏的 **电脑操作能力**，按需要打开开关；组件缺失时，确认安装并等待自检。
+4. 进入侧栏的 **电脑操作能力**，按需要打开开关；组件缺失时，按管理页的提示补齐，再启用并查看自检结果。
 
-下载修复包：[`dsh-computer-use-manager-0.1.0-alpha.4.tgz`](https://github.com/jwhs648/dsh-computer-use-manager/releases/download/v0.1.0-alpha.4/dsh-computer-use-manager-0.1.0-alpha.4.tgz)。同页提供 SHA-256 校验文件，安装前核对版本和校验和。旧版发行包的兼容范围不同。
+历史 alpha.4 修复包：[`dsh-computer-use-manager-0.1.0-alpha.4.tgz`](https://github.com/jwhs648/dsh-computer-use-manager/releases/download/v0.1.0-alpha.4/dsh-computer-use-manager-0.1.0-alpha.4.tgz)。同页提供 SHA-256 校验文件，安装前核对版本和校验和。旧版发行包的兼容范围不同。
 
 也可以安装本地源码目录。使用 Desktop 安装的 `dsh` 命令；为确保变更完整应用，先退出 DSH，执行后再打开：
 
 ```powershell
-dsh plugin --profile desktop add "C:\path\to\dsh-computer-use-manager-0.1.0-alpha.4.tgz"
+dsh plugin --profile desktop add "C:\path\to\local-dsh-computer-use-manager-0.1.0-alpha.5.tgz"
 ```
 
 远程浏览器电脑上的文件路径不能直接用于 DSH 主机。首次选择本插件不会自动开启电脑操作驱动，两个可选底层组件默认关闭。替换已安装的 Host 代码可能需要重启；刷新页面本身不能替代宿主重启。
@@ -80,11 +82,12 @@ dsh plugin --profile desktop add "C:\path\to\dsh-computer-use-manager-0.1.0-alph
 ## 开启流程
 
 ```text
-点击开关 → 检查本地组件 → 必要时确认并安装 → 启用 → 等待驱动就绪 → 自检
+点击开关 → 本地检查 → 组件齐全 → 启用并确认驱动就绪 → 自检
+                     ↳ 缺包 → 按提示补齐 → 重新检测
 ```
 
 - 本地组件已兼容时，跳过联网查询与下载。
-- 缺失或不兼容时，先验证当前 DSH 的匹配版本，再请求安装确认；确认五分钟有效、仅可使用一次。
+- DSH `0.2.2-rc.3` 上缺包时，可查询匹配版本并确认补装。确认五分钟有效，可使用一次。在其他受支持宿主上，页面列出缺失或版本不符的组件，并给出当前版本的 `dsh plugin` 命令。退出 DSH 后在对应配置下执行，重新打开管理页并检测。若异常来自 Desktop 自带的组件，请更新或修复 Desktop。
 - 安装、启动、需要重启和自检异常分别报告，不会一律显示为成功。
 - 组件或当前 DSH 版本、兼容条件改变时，旧组件检查结果会失效；需要重新检查后再安装匹配版本。宿主升级到 rc.3 后，原 rc.2 官方组件也需在管理页检查并更新为 rc.3。
 - 已确认的 HMR 等待条件消除后，会清除相应重启提示；仅观察到运行正常，不会抹掉未知的重启或修复原因。
@@ -104,9 +107,10 @@ dsh plugin --profile desktop add "C:\path\to\dsh-computer-use-manager-0.1.0-alph
 
 | 项目 | 范围 |
 | --- | --- |
-| 本版目标宿主 | Windows x64、DSH Desktop `0.2.2-rc.3` |
-| 声明范围 | 精确 `0.2.2-rc.3`；旧 `rc.2` / `rc.1` 不在本版范围内 |
+| 管理页声明范围 | Windows x64，DSH `>=0.2.2-rc.3 <0.2.2`；后续 RC 的运行结果取决于宿主接口兼容性 |
+| 管理页内补装 | DSH `0.2.2-rc.3` |
 | 原生驱动 | Cua Driver Native，组件版本与 DSH 匹配 |
+| 跨版本验证 | 同一安装包配合 `rc.3`、`rc.4`、`rc.5` 的官方宿主包，检查加载、状态接口、组件识别和补装权限；驱动运行状态由隔离环境提供 |
 | 后台回归 | 包括串行 HMR 队列、取消与新停用交错、遗留安装记录、安装所有权边界 |
 | 浏览器回归 | 真实插件自有控件；后台使用隔离适配器，不能代替实机集成 |
 | 尚未实测 | 第二台机器首装、macOS、Linux、其他 DSH 版本 |

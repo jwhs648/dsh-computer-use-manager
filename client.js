@@ -107,6 +107,10 @@ window.__ModuleLoader__.load({
         activate: '启用电脑操作能力', warning: '需关注', needsConfirmation: '需要安装组件',
         phaseChecking: '正在检查本地组件', phaseInstalling: '正在安装组件', phaseEnabling: '正在启用服务', phaseWaiting: '等待服务就绪', phaseHealth: '正在运行自检',
         activateTitle: '安装组件并启用电脑操作能力？', activateDescription: '安装和启用将影响当前配置下的所有会话；完成后可能需要重启 DSH。',
+        manualGuide: '退出 DSH 后，在终端运行下方官方插件管理命令。若使用其他配置，请将 desktop 换成对应的配置名。',
+        manualUnknown: '无法确认组件名或目标版本。请核对 DSH 安装后重新检测。',
+        manualRetry: '重新启动 DSH 后，回到这里重新检测。如果 DSH 自带组件版本不匹配，请修复或更新 DSH 安装。',
+        manualRequired: '请使用 DSH 插件管理命令安装匹配版本。', retryLocal: '重新检测本地组件',
         activateConfirm: '安装并启用', installVersion: '安装版本', installPackages: '安装组件',
       },
       en: {
@@ -133,9 +137,21 @@ window.__ModuleLoader__.load({
         activate: 'Enable computer-use capability', warning: 'Needs attention', needsConfirmation: 'Component installation required',
         phaseChecking: 'Checking local components', phaseInstalling: 'Installing components', phaseEnabling: 'Enabling service', phaseWaiting: 'Waiting for readiness', phaseHealth: 'Running health check',
         activateTitle: 'Install components and enable computer use?', activateDescription: 'Installation and enablement affect every session in the current profile and may require restarting DSH.',
+        manualGuide: 'Close DSH and run the official plugin management command below in a terminal. Replace desktop if you use a different profile.',
+        manualUnknown: 'The component names or target version could not be verified. Check your DSH installation and retry local detection.',
+        manualRetry: 'Restart DSH, then return here and retry local detection. If a bundled component has the wrong version, repair or update the DSH installation.',
+        manualRequired: 'Install matching versions with the DSH plugin management command.', retryLocal: 'Retry local detection',
         activateConfirm: 'Install and enable', installVersion: 'Install version', installPackages: 'Components to install',
       },
     };
+    const COMPONENT_NAMES = new Set(['@deepseek-ai/dsh-computer-use', '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native', '@deepseek-ai/dsh-mcp-client']);
+    function manualInstallCommand(packages, version) {
+      // Only interpolate exact package names and a shell-safe SemVer from the local status.
+      const exactVersion = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[\da-zA-Z-]*[a-zA-Z-][\da-zA-Z-]*)(?:\.(?:0|[1-9]\d*|[\da-zA-Z-]*[a-zA-Z-][\da-zA-Z-]*))*)?(?:\+[\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*)?$/;
+      if (typeof version !== 'string' || version.length > 120 || !exactVersion.test(version) || !packages.length ||
+          !packages.every(item => COMPONENT_NAMES.has(item.name) && item.targetVersion === version)) return null;
+      return 'dsh plugin --profile desktop add --save-exact --ignore-scripts ' + packages.map(item => item.name + '@' + version).join(' ');
+    }
     const CSS = `
 .cum-button{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:32px;min-width:32px;max-width:100%;padding:5px 11px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;text-align:center;overflow-wrap:anywhere;cursor:pointer;flex-shrink:0}
 .cum-button>svg{flex:none}.cum-button:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2)}.cum-button[data-variant=primary]{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-base)}.cum-button[data-variant=primary]:hover:not(:disabled){background:var(--dsw-alias-brand-primary)}.cum-button:disabled,.cum-switch:disabled{opacity:.5;cursor:default}.cum-button:focus-visible,.cum-switch:focus-visible,.cum-table-wrap:focus-visible,.cum-log summary:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:3px}
@@ -241,7 +257,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         const operation = state?.operation;
         if (!activationAttempt.current) return;
-        if (operation?.id !== activationAttempt.current || operation.kind !== 'activate') {
+        if (state.inlineInstallSupported === false || operation?.id !== activationAttempt.current || operation.kind !== 'activate') {
           activationAttempt.current = null;
           setConfirmation(current => current?.kind === 'activate' ? null : current);
           return;
@@ -273,6 +289,7 @@ window.__ModuleLoader__.load({
         setConfirmation(null);
       };
       const confirmAction = () => {
+        if (manualOnly && confirmation?.kind !== 'disable') return dismissConfirmation();
         if (confirmation?.kind === 'activate') {
           const approval = confirmation.approval;
           if (activationAttempt.current !== confirmation.operationId || state?.operation?.status !== 'needs-confirmation' || state.operation.confirmation?.approvalId !== approval.approvalId) return dismissConfirmation();
@@ -282,6 +299,10 @@ window.__ModuleLoader__.load({
       };
       const phaseLabel = phase => t(({ checking: 'phaseChecking', installing: 'phaseInstalling', enabling: 'phaseEnabling', waiting: 'phaseWaiting', health: 'phaseHealth' })[phase] || 'operationRunning');
       const packages = Array.isArray(state?.packages) ? state.packages : [];
+      const manualOnly = state?.inlineInstallSupported === false;
+      const needed = packages.filter(item => !item.compatible);
+      const manualInstallNeeded = manualOnly && ['missing', 'incompatible'].includes(state.status);
+      const command = manualInstallNeeded ? manualInstallCommand(needed, state.runtimeVersion) : null;
       const checks = Array.isArray(state?.health?.checks) ? state.health.checks : [];
       const history = Array.isArray(state?.history) ? state.history.slice(0, 12) : [];
       const update = state?.update || { status: 'unchecked' };
@@ -306,15 +327,20 @@ window.__ModuleLoader__.load({
               h('div', { className: 'cum-section-head' }, h('h2', null, t('service'))),
               h('div', { className: 'cum-service-row' },
                 h('div', { className: 'cum-actions' }, h('span', null, t('configured')), h(Status, { status: configuredEnabled === true ? 'ok' : configuredEnabled === false ? 'disabled' : 'unknown' }, t(configuredEnabled === true ? 'enabled' : configuredEnabled === false ? 'disabled' : 'unknown'))),
-                h(UI.Switch, { checked: configuredEnabled === true, disabled: locked || configuredEnabled === null, label: t('enable'), onChange: enabled => enabled ? begin('activate') : setConfirmation({ kind: 'disable' }) })),
+                h(UI.Switch, { checked: configuredEnabled === true, disabled: locked || configuredEnabled === null || (manualInstallNeeded && !configuredEnabled), label: t('enable'), onChange: enabled => enabled ? begin('activate') : setConfirmation({ kind: 'disable' }) })),
               h('dl', { className: 'cum-facts' },
                 fact('runtimeVersion', state.runtimeVersion, true), fact('platform', state.platform, true), fact('provider', state.provider || t('noProvider'), true), fact('toolCount', state.toolCount ?? 0)),
-              state.reason ? note(state.reason, tone(state.status) === 'error' ? 'error' : 'warn') : null),
+              manualInstallNeeded ? h('div', { 'data-manual-install': true },
+                note(t(command ? 'manualGuide' : 'manualUnknown')),
+                command ? h('p', null, h('code', { className: 'cum-code' }, command)) : null,
+                h('p', null, t('manualRetry')),
+                button('retryLocal', () => request(), UI.IconRefreshOutlineRegular, { disabled: fetching })) : null,
+              !manualInstallNeeded && state.reason ? note(state.reason, tone(state.status) === 'error' ? 'error' : 'warn') : null),
             h('section', { className: 'cum-section', 'aria-label': t('packages') },
               h('div', { className: 'cum-section-head' }, h('h2', null, t('packages')),
                 h('div', { className: 'cum-actions' },
                   button('checkUpdates', () => begin('checkUpdates'), UI.IconRefreshOutlineRegular),
-                  button('update', () => setConfirmation({ kind: 'update' }), UI.IconDownloadOutlineRegular, { disabled: locked || update.status !== 'available' }))),
+                  manualOnly ? null : button('update', () => setConfirmation({ kind: 'update' }), UI.IconDownloadOutlineRegular, { disabled: locked || update.status !== 'available' }))),
               h('div', { className: 'cum-inline-facts' },
                 h('span', null, t('updateStatus') + ': ', h(Status, { status: update.status }, t(update.status || 'unchecked'))),
                 h('span', null, t('lastCheck') + ': ', h('strong', null, showTime(update.checkedAt)))),
@@ -335,7 +361,7 @@ window.__ModuleLoader__.load({
             state.operation ? h('section', { className: 'cum-section', 'aria-label': t('operation'), 'aria-live': 'polite' },
               h('div', { className: 'cum-section-head' }, h('h2', null, t('operation')), h(Status, { status: operationRunning ? 'ongoing' : state.operation.status }, operationLabel(state.operation.status))),
               h('div', { className: 'cum-inline-facts' }, h('strong', null, actionLabel(state.operation.kind)), operationRunning && state.operation.phase ? h(Status, { status: 'ongoing' }, phaseLabel(state.operation.phase)) : null, h('span', null, showTime(state.operation.finishedAt || state.operation.startedAt))),
-              h('div', { 'data-operation-message': true }, state.operation.message || t('none')),
+              h('div', { 'data-operation-message': true }, state.operation.code === 'manual_install_required' ? t('manualRequired') : state.operation.message || t('none')),
               logText ? h('details', { className: 'cum-log' }, h('summary', null, t('logs')), h('pre', null, logText)) : null) : null,
             h('section', { className: 'cum-section', 'aria-label': t('history') },
               h('div', { className: 'cum-section-head' }, h('h2', null, t('history'))),

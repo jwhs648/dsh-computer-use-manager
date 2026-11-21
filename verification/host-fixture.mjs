@@ -3,14 +3,15 @@ import { ComputerUseManager } from '../core.js';
 import { createApiHandler } from '../api.js';
 
 export const packageNames = ['@deepseek-ai/dsh-computer-use', '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native', '@deepseek-ai/dsh-mcp-client'];
-export const version = '0.2.2-rc.3';
 const specs = packageNames.slice(0, 2).map((name, index) => ({ name, id: ['computer-use', 'computer-use-cua-driver-native'][index] }));
 
 // Only the Host boundaries are fake. The manager and HTTP handler are production code.
 // No adapter method touches profiles, packages, subprocesses, HTTP, or the desktop.
 export async function createHostFixture(options = {}) {
+  const version = options.version || '0.2.2-rc.3';
   const missing = options.scenario === 'missing';
-  const enabled = options.scenario === 'running';
+  let mismatch = options.scenario === 'incompatible';
+  const enabled = options.enabled ?? (options.scenario === 'running');
   const outcome = options.outcome || 'done';
   const records = { calls: [], events: [], installs: 0, enables: 0, healthRuns: 0 };
   let installed = !missing;
@@ -48,7 +49,7 @@ export async function createHostFixture(options = {}) {
   };
   const runtime = {
     platform: 'win32', version: () => version, configured: () => structuredClone(configured),
-    manifest: (_ctx, name) => { if (!installed) throw new Error('Fixture package absent.'); return { name, version }; },
+    manifest: (_ctx, name) => { if (!installed) throw new Error('Fixture package absent.'); return { name, version: mismatch && name === packageNames[1] ? '0.2.2-rc.1' : version }; },
     compatible: manifest => manifest.version === version,
     lookup: async (_ctx, name, target, signal) => { await delay(8, undefined, { signal }); return { exitCode: 0, stdout: JSON.stringify({ name, version: target }) }; },
     lock: (_ctx, callback, signal) => { signal.throwIfAborted(); return callback(); },
@@ -79,6 +80,8 @@ export async function createHostFixture(options = {}) {
         manager.value.operation = { id: 'foreign', kind: 'activate', status: 'needs-confirmation', confirmation: { approvalId: 'foreign-approval', version, packages: ['foreign-package'] } };
         return null;
       }
+      if (message.kind === 'externalRemoval') { installed = false; return null; }
+      if (message.kind === 'externalInstall') { installed = true; mismatch = false; return null; }
       if (message.kind === 'stats') return { ...records, state: manager.snapshot() };
       if (message.kind !== 'request') throw new Error('Unknown fixture bridge message.');
       const options = message.options || {};

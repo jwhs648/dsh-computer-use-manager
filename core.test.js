@@ -80,7 +80,7 @@ function fixture(options = {}) {
     compatible: manifest => manifest.compatible !== false,
     lookup: async (_ctx, name, version, signal) => {
       assert.equal(lock, false, 'registry checks must not hold the write lock');
-      assert.equal(version, VERSION);
+      assert.equal(version, runtime.version());
       assert.ok(signal instanceof AbortSignal);
       calls.push(['lookup', name, version]);
       return { exitCode: 0, stdout: JSON.stringify({ name, version }), stderr: '', timedOut: false };
@@ -303,7 +303,7 @@ test('registry lookup failures preserve safe JSON stdout, exit codes and timeout
 test('loads without host peers and returns detached exact-version runtime state', async () => {
   const f = fixture();
   const state = await f.manager.state();
-  assert.equal(state.managerVersion, '0.1.0-alpha.4');
+  assert.equal(state.managerVersion, '0.1.0-alpha.5');
   assert.equal(state.runtimeVersion, VERSION);
   assert.equal(state.platform, 'win32');
   assert.equal(state.status, 'running');
@@ -1672,4 +1672,100 @@ test('approved activation abort during installation never enables and retains on
   f.calls.length = 0;
   assert.equal((await perform(f.manager, 'activate', approval)).operation.status, 'failed');
   assert.equal(f.calls.length, 0);
+});
+
+const RC5 = '0.2.2-rc.5';
+function unreviewedFixture(options) {
+  const f = activationFixture(options);
+  f.runtime.version = () => RC5;
+  for (const manifest of f.manifests.values()) manifest.version = RC5;
+  return f;
+}
+
+test('rc.5 enables matching local components, then repeats activation without toggling active rows', async () => {
+  const f = unreviewedFixture();
+  const first = await perform(f.manager, 'activate');
+  assert.equal(first.inlineInstallSupported, false);
+  assert.equal(first.operation.status, 'done');
+  assert.equal(first.health.overall, 'ok');
+  assert.deepEqual(f.calls, IDS.map(id => ['toggle', 'include:' + id, true]));
+  f.calls.length = 0;
+  const again = await perform(f.manager, 'activate');
+  assert.equal(again.health.overall, 'ok');
+  assert.equal(again.operation.status, 'done');
+  assert.deepEqual(f.calls, []);
+});
+
+test('rc.5 activation directs missing, mismatched or incompatible components to manual installation', async t => {
+  for (const kind of ['missing', 'mismatch', 'incompatible', 'missing-rows']) await t.test(kind, async () => {
+    const f = unreviewedFixture();
+    if (kind === 'mismatch') f.manifests.get(NAMES[0]).version = VERSION;
+    else if (kind === 'incompatible') f.manifests.get(NAMES[2]).compatible = false;
+    else f.manifests.delete(NAMES[1]);
+    if (kind === 'missing-rows') f.configured.length = 0;
+    const state = await perform(f.manager, 'activate');
+    assert.equal(state.inlineInstallSupported, false);
+    assert.equal(state.operation.status, 'failed');
+    assert.equal(state.operation.code, 'manual_install_required');
+    assert.equal(state.operation.confirmation, undefined);
+    assert.equal(state.health, null);
+    assert.deepEqual(f.calls, []);
+  });
+});
+
+test('explicit rc.5 package check is read-only and direct update fails before registry or write operations', async () => {
+  const f = unreviewedFixture();
+  f.manifests.delete(NAMES[1]);
+  const checked = await perform(f.manager, 'checkUpdates');
+  assert.equal(checked.update.status, 'available');
+  assert.deepEqual(f.calls.splice(0), NAMES.map(name => ['lookup', name, RC5]));
+  const updated = await perform(f.manager, 'update');
+  assert.equal(updated.operation.code, 'manual_install_required');
+  assert.equal(updated.update.status, 'unavailable');
+  assert.deepEqual(f.calls, []);
+  assert.equal((await perform(f.manager, 'setEnabled', { enabled: true })).operation.status, 'failed');
+  assert.deepEqual(f.calls, []);
+});
+
+test('reviewed installation approval uses components that became locally available during confirmation', async () => {
+  const f = activationFixture();
+  assert.equal((await f.manager.state()).inlineInstallSupported, true);
+  const manifest = f.manifests.get(NAMES[0]);
+  f.manifests.delete(NAMES[0]);
+  const consent = await requestApproval(f);
+  f.manifests.set(NAMES[0], manifest);
+  f.calls.length = 0;
+  const state = await perform(f.manager, 'activate', consent);
+  assert.equal(state.operation.status, 'done');
+  assert.deepEqual(f.calls, IDS.map(id => ['toggle', 'include:' + id, true]));
+});
+
+test('version changes while acquiring the lock or making a backup prevent package writes', async t => {
+  for (const step of ['lock', 'backup']) await t.test(step, async () => {
+    const f = fixture();
+    const original = f.runtime[step];
+    f.runtime[step] = async (...args) => { f.runtime.version = () => RC5; return original(...args); };
+    const state = await perform(f.manager, 'update');
+    assert.equal(state.operation.status, 'failed');
+    assert.equal(state.operation.code, 'manual_install_required');
+    assert.equal(state.inlineInstallSupported, false);
+    const disallowed = step === 'lock' ? ['admit', 'backup', 'run', 'restore'] : ['run', 'restore'];
+    assert.ok(f.calls.every(([name]) => !disallowed.includes(name)));
+  });
+});
+
+test('a host change during installation prevents subsequent reconciliation, restore and repair', async () => {
+  const f = fixture();
+  const run = f.runtime.run;
+  f.runtime.run = async (...args) => {
+    const result = await run(...args);
+    f.runtime.version = () => RC5;
+    return result;
+  };
+  const state = await perform(f.manager, 'update');
+  assert.equal(state.operation.status, 'failed');
+  assert.equal(state.restartRequired, true);
+  assert.match(state.operation.message, /repair/);
+  assert.equal(f.calls.filter(([action]) => action === 'run').length, 1);
+  assert.ok(f.calls.every(([action]) => !['restore', 'reconcile'].includes(action)));
 });

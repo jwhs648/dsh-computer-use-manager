@@ -1,11 +1,9 @@
 # Developer notes
 
 A local DSH bundle for the Windows native Cua Driver provider. The manager
-remains available independently of the optional driver. Version 0.1.0-alpha.4
-targets Windows x64 with DSH Desktop 0.2.2-rc.3 and its matching Host peers.
-Version 0.1.0-alpha.3 targets rc.2; it is outside this release's declared range.
-Version 0.1.0-alpha.2 was published on GitHub on 2026-11-07 for rc.1; rc.1
-is outside this release's declared compatibility range.
+remains available independently of the optional driver. See `package.json` for
+the supported host range. Inline component installation has its own narrower
+compatibility boundary.
 
 ## Integration
 
@@ -36,7 +34,7 @@ active provider alone does not clear unknown restart or repair requirements.
 ## Activation and approval
 
 Activation runs on the Host. Compatible local packages require no network
-lookup or installation. Missing or incompatible packages must first be checked
+lookup or installation. On hosts with reviewed inline installation, missing or incompatible packages are checked
 against the exact running DSH version. The response contains a five-minute,
 one-use instance-owned approval, bound to that version and the three fixed
 package names. A stale approval, changed host version or failed prerequisite
@@ -50,7 +48,8 @@ have `configuredEnabled: true` while the current provider is not running.
 
 ## Package-operation admission
 
-This version declares only DSH 0.2.2-rc.3 and the matching Host peers. The
+Inline installation is reviewed for DSH 0.2.2-rc.3. Other supported hosts
+show the versioned package specs for the official `dsh plugin` CLI. The
 production admission adapter depends on the host package-operation layout;
 it is not a claimed public cross-version admission API.
 
@@ -111,7 +110,7 @@ boundaries, cancellation after an external disable, configuration changes during
 installation, production admission/runner contracts and uncertain recovery
 writers. API tests cover argument restrictions, authentication-adjacent CSRF
 checks, cache policy and diagnostic redaction. Package tests cover display
-resources, exact host range, default-disabled component rows and client imports.
+resources, bounded prerelease range, default-disabled component rows and client imports.
 
 The existing browser runner renders the real client and calls the real manager
 and endpoint handler through an in-memory bridge. Installation, registry,

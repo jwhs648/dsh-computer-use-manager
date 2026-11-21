@@ -92,6 +92,53 @@ try {
     assert.equal(result.healthRuns, 1);
     assert.deepEqual(result.events, ['checking', 'enabling', 'waiting', 'health']);
   });
+  for (const [locale, initial, version] of [['en', 'missing', '0.2.2-rc.4'], ['zh', 'incompatible', '0.2.2-rc.5']]) await test('manual install guidance and local retry for ' + initial, async () => {
+    const page = await scenario({ locale, version, scenario: initial }, 390);
+    const guide = page.locator('[data-manual-install]');
+    await expect(guide).toContainText(locale === 'zh' ? '官方插件管理命令' : 'official plugin management command');
+    const targets = initial === 'missing' ? packageNames : [packageNames[1]];
+    await expect(guide.locator('code')).toHaveText('dsh plugin --profile desktop add --save-exact --ignore-scripts ' + targets.map(name => name + '@' + version).join(' '));
+    await expect(page.getByRole('switch')).toBeDisabled();
+    await expect(page.getByRole('button', { name: locale === 'zh' ? '安装匹配版本' : 'Install matching versions', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: locale === 'zh' ? '检查兼容组件' : 'Check compatible components', exact: true }).click();
+    await tick(page);
+    await page.evaluate(() => window.__managerBridge({ kind: 'externalInstall' }));
+    await guide.getByRole('button', { name: locale === 'zh' ? '重新检测本地组件' : 'Retry local detection', exact: true }).click();
+    await expect(guide).toHaveCount(0);
+    await expect(page.getByRole('switch')).toBeEnabled();
+    assert.deepEqual((await stats(page)).calls, [{ action: 'checkUpdates' }]);
+    await page.getByRole('switch').click();
+    await tick(page);
+    await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+    assert.equal((await stats(page)).installs, 0);
+  });
+  await test('manual install guidance omits command for an invalid target version', async () => {
+    const page = await scenario({ scenario: 'missing', version: '0.2.2-rc.5 && unexpected', locale: 'en' });
+    const guide = page.locator('[data-manual-install]');
+    await expect(guide).toContainText('could not be verified');
+    await expect(guide.locator('code')).toHaveCount(0);
+    await expect(guide.getByRole('button', { name: 'Retry local detection', exact: true })).toBeEnabled();
+  });
+  await test('manual install error after external removal shows localized recovery', async () => {
+    const page = await scenario({ scenario: 'ready', version: '0.2.2-rc.5' });
+    await page.evaluate(() => window.__managerBridge({ kind: 'externalRemoval' }));
+    await page.getByRole('switch').click();
+    await tick(page);
+    assert.equal((await stats(page)).state.operation.code, 'manual_install_required');
+    await expect(page.locator('[data-operation-message]')).toContainText('匹配版本');
+    await expect(page.locator('[data-manual-install]')).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+  await test('manual install guidance permits disabling incompatible configuration', async () => {
+    const page = await scenario({ scenario: 'incompatible', version: '0.2.2-rc.5', enabled: true });
+    await expect(page.locator('[data-manual-install]')).toBeVisible();
+    await page.getByRole('switch').click();
+    await page.getByRole('button', { name: '确认停用', exact: true }).click();
+    await tick(page);
+    await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByRole('switch')).toBeDisabled();
+    assert.deepEqual((await stats(page)).calls, [{ action: 'setEnabled', enabled: false }]);
+  });
   await test('missing components automatically request one approval then enable and check health', async () => {
     const page = await scenario({ scenario: 'missing' });
     await pending(page);

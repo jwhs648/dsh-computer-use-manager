@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Computer-use capability manager",
-    "description": "Computer-use activation, runtime status, matching versions and health checks."
+    "description": "Manage computer-use activation, check runtime health, and identify the official packages required for your DSH version."
   }
 }
