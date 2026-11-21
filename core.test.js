@@ -303,7 +303,7 @@ test('registry lookup failures preserve safe JSON stdout, exit codes and timeout
 test('loads without host peers and returns detached exact-version runtime state', async () => {
   const f = fixture();
   const state = await f.manager.state();
-  assert.equal(state.managerVersion, '0.1.0-alpha.5');
+  assert.equal(state.managerVersion, '0.2.0-beta.1');
   assert.equal(state.runtimeVersion, VERSION);
   assert.equal(state.platform, 'win32');
   assert.equal(state.status, 'running');

@@ -8,7 +8,7 @@
 
 A community activation and management UI for DSH's existing computer-use capability, not a separate computer-control engine. 非 DeepSeek 或 Cua 官方发行组件。
 
-当前源码版本为 `0.1.0-alpha.5`（本地预发布包）。下列下载链接指向历史发行版。
+当前预发行版为 **0.2.0-beta.1**。从 [GitHub Release](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.2.0-beta.1) 下载[插件安装包](https://github.com/jwhs648/dsh-computer-use-manager/releases/download/v0.2.0-beta.1/local-dsh-computer-use-manager-0.2.0-beta.1.tgz)和 SHA-256 校验文件。
 
 上次发布版本：[`0.1.0-alpha.4`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.4)，适配 DSH Desktop `0.2.2-rc.3`。
 
@@ -74,7 +74,7 @@ A community activation and management UI for DSH's existing computer-use capabil
 也可以安装本地源码目录。使用 Desktop 安装的 `dsh` 命令；为确保变更完整应用，先退出 DSH，执行后再打开：
 
 ```powershell
-dsh plugin --profile desktop add "C:\path\to\local-dsh-computer-use-manager-0.1.0-alpha.5.tgz"
+dsh plugin --profile desktop add "C:\path\to\local-dsh-computer-use-manager-0.2.0-beta.1.tgz"
 ```
 
 远程浏览器电脑上的文件路径不能直接用于 DSH 主机。首次选择本插件不会自动开启电脑操作驱动，两个可选底层组件默认关闭。替换已安装的 Host 代码可能需要重启；刷新页面本身不能替代宿主重启。

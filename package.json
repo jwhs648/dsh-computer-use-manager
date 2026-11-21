@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-computer-use-manager",
-  "version": "0.1.0-alpha.5",
+  "version": "0.2.0-beta.1",
   "private": true,
   "license": "MIT",
   "type": "module",

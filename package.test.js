@@ -7,7 +7,7 @@ const json = async path => JSON.parse(await readFile(new URL(path, root), 'utf8'
 
 test('the bundle ships its runtime, display resources and third-party notices', async () => {
   const manifest = await json('package.json');
-  assert.equal(manifest.version, '0.1.0-alpha.5');
+  assert.equal(manifest.version, '0.2.0-beta.1');
   assert.equal(manifest.engines.dsh, '>=0.2.2-rc.3 <0.2.2');
   for (const name of ['@deepseek-ai/dsh-app-boot', '@deepseek-ai/dsh-plugin-manager', '@deepseek-ai/dsh-atomic-write']) {
     assert.equal(manifest.peerDependencies[name], manifest.engines.dsh, 'Host peer must match the declared DSH version: ' + name);

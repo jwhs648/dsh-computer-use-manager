@@ -23,7 +23,7 @@ export async function admitProfileUpdate(dir, version, signal) {
   throw fail('A previous package-operation record exists. Use the official plugin manager to settle or inspect it before retrying; no profile snapshot was taken.', 'unavailable');
 }
 
-const MANAGER_VERSION = '0.1.0-alpha.5';
+const MANAGER_VERSION = '0.2.0-beta.1';
 const PROVIDER = 'cua-driver-native';
 const PREFIX = 'cua_driver_native__';
 const HEALTH_TOOL = PREFIX + 'health_report';
