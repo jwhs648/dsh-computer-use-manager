@@ -2,8 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { lstat } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { ACTIONS, actionArgumentsError } from './api.js';
 
-const inlineInstallSupported = version => version === '0.2.2-rc.3';
+// Inline installation drives internal host package operations, so it is offered only on DSH
+// versions whose installation flow was verified. The list lives once, in package.json.
+const INLINE_INSTALL_VERSIONS = Object.freeze([...(createRequire(import.meta.url)('./package.json').dshComputerUseManager?.inlineInstallVersions ?? [])]);
+const inlineInstallSupported = version => INLINE_INSTALL_VERSIONS.includes(version);
 
 function requireInlineInstall(version) {
   if (!inlineInstallSupported(version)) throw fail('Inline installation requires a reviewed DSH package-operation contract. Follow the manager setup instructions to install missing components with the dsh plugin CLI or repair mismatched bundled components in DSH. Restart DSH and activate again.', 'manual_install_required');
@@ -23,7 +28,7 @@ export async function admitProfileUpdate(dir, version, signal) {
   throw fail('A previous package-operation record exists. Use the official plugin manager to settle or inspect it before retrying; no profile snapshot was taken.', 'unavailable');
 }
 
-const MANAGER_VERSION = '0.2.0-beta.1';
+const MANAGER_VERSION = '0.2.0-beta.2';
 const PROVIDER = 'cua-driver-native';
 const PREFIX = 'cua_driver_native__';
 const HEALTH_TOOL = PREFIX + 'health_report';
@@ -32,7 +37,6 @@ const PACKAGES = Object.freeze([
   { name: '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native', label: 'CUA Driver Native', id: 'computer-use-cua-driver-native' },
   { name: '@deepseek-ai/dsh-mcp-client', label: 'MCP Client' },
 ]);
-const ACTIONS = new Set(['setEnabled', 'checkUpdates', 'update', 'health', 'activate']);
 const LIMITS = { read: 5000, health: 30000, checkUpdates: 75000, setEnabled: 120000, update: 600000, activate: 900000, readiness: 30000, poll: 250, recovery: 180000 };
 const APPROVAL_TTL_MS = 5 * 60 * 1000;
 const clone = value => structuredClone(value);
@@ -308,13 +312,10 @@ export class ComputerUseManager {
   async start(action, args = {}) {
     if (this.disposed) throw fail('The computer-use manager is disposed.', 'disposed');
     if (!ACTIONS.has(action)) throw fail('Unknown action.');
-    const keys = ['action', ...(action === 'setEnabled' ? ['enabled'] : action === 'activate' ? ['installVersion', 'approvalId'] : [])];
-    if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some(key => !keys.includes(key)) ||
-        (args.action !== undefined && args.action !== action) || (action === 'setEnabled' && typeof args.enabled !== 'boolean')) throw fail('Invalid action arguments.');
+    if (!args || typeof args !== 'object' || Array.isArray(args) || (args.action !== undefined && args.action !== action)) throw fail('Invalid action arguments.');
+    const invalid = actionArgumentsError({ ...args, action });
+    if (invalid) throw fail(invalid);
     const approved = action === 'activate' && Object.hasOwn(args, 'approvalId');
-    if (action === 'activate' && (Object.hasOwn(args, 'installVersion') !== approved || (approved &&
-        (typeof args.installVersion !== 'string' || !args.installVersion.trim() || args.installVersion.length > 120 ||
-         typeof args.approvalId !== 'string' || !args.approvalId.trim() || args.approvalId.length > 160)))) throw fail('Invalid activation approval arguments.');
     if (this.pending) throw fail('A computer-use operation is already running.', 'busy');
     const controller = this.controller = new AbortController();
     const operation = this.value.operation = { id: randomUUID(), kind: action, status: 'running', message: 'Starting ' + action + '.', startedAt: this.now(), finishedAt: null };
@@ -448,18 +449,32 @@ export class ComputerUseManager {
   async checkUpdates(runtime, signal) {
     const version = runtime.version();
     this.value.update = { status: 'checking', checkedAt: null, targetVersion: version, reason: null };
-    for (const spec of PACKAGES) {
-      signal.throwIfAborted();
-      const result = await this.readWithin(innerSignal => runtime.lookup(this.ctx, spec.name, version, innerSignal), signal, 25000);
-      signal.throwIfAborted();
-      if (result.exitCode !== 0 || result.timedOut) throw fail('Matching package unavailable: ' + spec.name + '. ' + registryFailure(result), 'unavailable');
-      let manifest;
-      try {
-        if (typeof result.stdout !== 'string' || result.stdout.length > 262144) throw fail('Invalid registry response.');
-        manifest = JSON.parse(result.stdout.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').trim());
-      } catch { throw fail('Invalid registry metadata for ' + spec.name + '.'); }
-      if (manifest?.name !== spec.name || manifest.version !== version || !runtime.compatible(manifest, version)) throw fail('The registry did not provide the exact compatible ' + spec.name + '@' + version + '.', 'unavailable');
+    signal.throwIfAborted();
+    // Look up all packages concurrently; the first failure cancels the remaining lookups.
+    const group = new AbortController();
+    const forward = () => group.abort(signal.reason);
+    signal.addEventListener('abort', forward, { once: true });
+    try {
+      await Promise.all(PACKAGES.map(async spec => {
+        try {
+          const result = await this.readWithin(innerSignal => runtime.lookup(this.ctx, spec.name, version, innerSignal), group.signal, 25000);
+          group.signal.throwIfAborted();
+          if (result.exitCode !== 0 || result.timedOut) throw fail('Matching package unavailable: ' + spec.name + '. ' + registryFailure(result), 'unavailable');
+          let manifest;
+          try {
+            if (typeof result.stdout !== 'string' || result.stdout.length > 262144) throw fail('Invalid registry response.');
+            manifest = JSON.parse(result.stdout.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').trim());
+          } catch { throw fail('Invalid registry metadata for ' + spec.name + '.'); }
+          if (manifest?.name !== spec.name || manifest.version !== version || !runtime.compatible(manifest, version)) throw fail('The registry did not provide the exact compatible ' + spec.name + '@' + version + '.', 'unavailable');
+        } catch (error) {
+          if (!group.signal.aborted) group.abort(error);
+          throw error;
+        }
+      }));
+    } finally {
+      signal.removeEventListener('abort', forward);
     }
+    signal.throwIfAborted();
     await this.refresh();
     if (runtime.version() !== version || this.value.runtimeVersion !== version || this.value.status === 'unknown') {
       throw fail('The running DSH environment changed or could not be verified; check compatible components again.');
@@ -669,7 +684,7 @@ export class ComputerUseManager {
   }
 
   async waitUntilReady(runtime, version, signal) {
-    const deadline = Date.now() + this.timeouts.readiness;
+    const deadline = this.clock() + this.timeouts.readiness;
     while (true) {
       signal.throwIfAborted();
       await this.refresh(true);
@@ -679,7 +694,7 @@ export class ComputerUseManager {
       this.verifyActivationConfiguration(runtime);
       if (this.value.running) return;
       if (this.value.status === 'failed') throw fail('The native provider failed to start. ' + (this.value.reason || ''));
-      const remaining = deadline - Date.now();
+      const remaining = deadline - this.clock();
       if (remaining <= 0) throw fail('The native provider did not become ready before the startup timeout.');
       await delay(Math.min(this.timeouts.poll, remaining), undefined, { signal });
     }

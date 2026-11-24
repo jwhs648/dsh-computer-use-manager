@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createApiHandler, publicError } from './api.js';
+import { createApiHandler, publicError, redactForModel } from './api.js';
 
 function setup() {
   const calls = [];
@@ -66,6 +66,47 @@ test('activation accepts only a plain preflight or paired bounded approval strin
     assert.equal((await handler(request({ action: 'activate', ...args }))).status, 400);
   }
   assert.equal(calls.length, 2);
+});
+
+test('model-facing state withholds the installation approval id without mutating the GUI state', () => {
+  const state = { status: 'disabled', operation: { id: 'op', kind: 'activate', status: 'needs-confirmation',
+    confirmation: { approvalId: 'secret-approval', version: '0.2.2-rc.3', packages: ['a'] } } };
+  const view = redactForModel(state);
+  assert.doesNotMatch(JSON.stringify(view), /secret-approval/);
+  assert.equal(view.operation.confirmation.approvalWithheld, true);
+  assert.equal(view.operation.confirmation.version, '0.2.2-rc.3');
+  assert.deepEqual(view.operation.confirmation.packages, ['a']);
+  assert.equal(state.operation.confirmation.approvalId, 'secret-approval');
+  for (const plain of [{ status: 'running', operation: null }, { status: 'running' }, { operation: { status: 'done' } }]) {
+    assert.equal(redactForModel(plain), plain);
+  }
+});
+
+test('the agent status tool never returns a replayable approval id', async () => {
+  const { apply } = await import('./index.js');
+  const { ComputerUseManager } = await import('./core.js');
+  const state = { operation: { status: 'needs-confirmation', confirmation: { approvalId: 'secret-approval', version: 'v', packages: ['a'] } } };
+  const original = ComputerUseManager.prototype.state;
+  ComputerUseManager.prototype.state = async () => structuredClone(state);
+  try {
+    let tool;
+    let route;
+    apply({
+      effect(fn) { fn(); },
+      tools: { register(definition) { tool = definition; } },
+      connection: { fetch: { register(definition) { route = definition; } } },
+    });
+    assert.equal(tool.name, 'computer_use_status');
+    assert.match(tool.description, /withheld/);
+    const output = await tool.execute({});
+    assert.doesNotMatch(JSON.stringify(output), /secret-approval/);
+    assert.equal(output.operation.confirmation.approvalWithheld, true);
+    // The cookie-authenticated GUI route still receives the id it needs to confirm.
+    const gui = await (await route.fetch(new Request('http://127.0.0.1:50061' + route.path))).json();
+    assert.equal(gui.value.operation.confirmation.approvalId, 'secret-approval');
+  } finally {
+    ComputerUseManager.prototype.state = original;
+  }
 });
 
 test('activation retains cross-origin, JSON-header and size protections', async () => {

@@ -107,8 +107,8 @@ dsh plugin --profile desktop add "C:\path\to\local-dsh-computer-use-manager-0.2.
 
 | 项目 | 范围 |
 | --- | --- |
-| 管理页声明范围 | Windows x64，DSH `>=0.2.2-rc.3 <0.2.2`；后续 RC 的运行结果取决于宿主接口兼容性 |
-| 管理页内补装 | DSH `0.2.2-rc.3` |
+| 管理页声明范围 | Windows x64，DSH `>=0.2.2-rc.3 <0.3.0-0`；CI 只针对最新 RC 做发布前验证，最新 alpha 仅作预警 |
+| 管理页内补装 | `package.json` 中 `dshComputerUseManager.inlineInstallVersions` 列出的版本（当前 `0.2.2-rc.3`）；其他版本显示手动安装命令 |
 | 原生驱动 | Cua Driver Native，组件版本与 DSH 匹配 |
 | 跨版本验证 | 同一安装包配合 `rc.3`、`rc.4`、`rc.5` 的官方宿主包，检查加载、状态接口、组件识别和补装权限；驱动运行状态由隔离环境提供 |
 | 后台回归 | 包括串行 HMR 队列、取消与新停用交错、遗留安装记录、安装所有权边界 |

@@ -286,6 +286,41 @@ test('unresolved pending code, invalid reconciliation and uncertain repair never
   });
 });
 
+test('registry lookups run concurrently and the first failure cancels the rest', async () => {
+  const f = fixture();
+  const started = [];
+  const signals = [];
+  const gate = deferred();
+  f.runtime.lookup = async (_ctx, name, version, signal) => {
+    started.push(name);
+    signals.push(signal);
+    if (name === NAMES[0]) return { exitCode: 1, stdout: '', stderr: 'offline', timedOut: false };
+    await gate.promise;
+    return { exitCode: 0, stdout: JSON.stringify({ name, version }), stderr: '', timedOut: false };
+  };
+  const state = await perform(f.manager, 'checkUpdates');
+  assert.deepEqual(started, NAMES, 'all lookups start before any result is awaited');
+  assert.equal(state.operation.status, 'failed');
+  assert.equal(state.update.status, 'unavailable');
+  assert.ok(signals.slice(1).every(signal => signal.aborted), 'pending lookups are cancelled after the first failure');
+  gate.resolve();
+});
+
+test('readiness timeout uses the injected clock', async () => {
+  let now = 0;
+  const f = activationFixture({ managerOptions: { clock: () => (now += 1000), timeouts: { readiness: 1500, poll: 1 } } });
+  f.services.pluginManager.setPluginEnabled = async (id, enabled) => {
+    const row = f.rows.find(item => item.entryId === id);
+    row.enabled = enabled;
+    row.fiberPhase = null;
+    f.configured.find(item => item.id === row.patchId).configuredEnabled = enabled;
+    return { application: 'applied' };
+  };
+  const state = await perform(f.manager, 'activate');
+  assert.equal(state.operation.status, 'failed');
+  assert.match(state.operation.message, /startup timeout/);
+});
+
 test('registry lookup failures preserve safe JSON stdout, exit codes and timeout context', async () => {
   const f = fixture();
   f.runtime.lookup = async () => ({ exitCode: 1, stdout: JSON.stringify({ error: { code: 'ECONNRESET', message: 'Connection reset token=sk-private-value' } }), stderr: 'TLS failure', timedOut: false });
@@ -303,7 +338,7 @@ test('registry lookup failures preserve safe JSON stdout, exit codes and timeout
 test('loads without host peers and returns detached exact-version runtime state', async () => {
   const f = fixture();
   const state = await f.manager.state();
-  assert.equal(state.managerVersion, '0.2.0-beta.1');
+  assert.equal(state.managerVersion, '0.2.0-beta.2');
   assert.equal(state.runtimeVersion, VERSION);
   assert.equal(state.platform, 'win32');
   assert.equal(state.status, 'running');

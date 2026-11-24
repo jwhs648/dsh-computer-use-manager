@@ -34,10 +34,10 @@ for (const project of projects) {
   const version = boot.getDshRuntimeVersion();
   const evaluate = (pkg, runtime) => boot.evaluatePluginCompatibility(pkg, {}, runtime);
   assert.equal(evaluate(manifest, version), undefined);
-  for (const accepted of ['0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5', '0.2.2-rc.6']) {
+  for (const accepted of ['0.2.2-rc.3', '0.2.2-rc.5', '0.2.2', '0.2.3-alpha.2', '0.2.3-rc.1', '0.2.9']) {
     assert.equal(evaluate(manifest, accepted), undefined);
   }
-  for (const rejected of ['0.2.2-rc.2', '0.2.2', '0.2.3-rc.1', '0.3.0']) {
+  for (const rejected of ['0.2.2-rc.2', '0.3.0-alpha.1', '0.3.0']) {
     assert.ok(evaluate(manifest, rejected));
   }
   const wrongPeers = { [host + 'app-boot']: '0.0.1' };
@@ -50,7 +50,12 @@ for (const project of projects) {
     assert.equal(component.version, version);
     assert.equal(component.dsh?.bundle, undefined);
     assert.equal(evaluate(component, version), undefined);
-    assert.ok(evaluate(component, version === '0.2.2-rc.3' ? '0.2.2-rc.4' : '0.2.2-rc.3'));
+    // Not every component pins a host peer any more (0.2.3 dsh-computer-use declares only cordis),
+    // so the host may accept it on another runtime. The manager does not rely on that: it requires
+    // component.version === runtime itself. Only a pinned component must be rejected elsewhere.
+    if (Object.values(component.peerDependencies ?? {}).includes(version)) {
+      assert.ok(evaluate(component, version === '0.2.2-rc.3' ? '0.2.2-rc.4' : '0.2.2-rc.3'));
+    }
   }
   const { PluginManager, parseInstallSpec } = await load(host + 'plugin-manager');
   assert.equal(typeof PluginManager.prototype.listPlugins, 'function');
@@ -65,7 +70,9 @@ for (const project of projects) {
   const cleanups = [];
   try {
     await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'compat-profile', private: true, dsh: { profile: { bundles: [manager] } } }));
-    const profileContext = { dir, home: dir, name: 'compat-profile', installAnchor: anchor, patchPath: join(dir, 'cordis.patch.yml'), overlays: [] };
+    // 0.2.3 renamed ProfileContext.overlays to overlayPaths. The manager reads the host-provided
+    // context, so only this simulated one needs both shapes.
+    const profileContext = { dir, home: dir, name: 'compat-profile', installAnchor: anchor, patchPath: join(dir, 'cordis.patch.yml'), overlays: [], overlayPaths: [] };
     // Exercise the inspector used by Add plugin with registry answers from the installed
     // published manifests. An empty installation manifest models a component still missing.
     const inspector = {
@@ -97,7 +104,7 @@ for (const project of projects) {
     assert.equal(value.configurationKnown, true);
     assert.equal(value.managerVersion, manifest.version);
     assert.equal(value.runtimeVersion, version);
-    assert.equal(value.inlineInstallSupported, version === '0.2.2-rc.3');
+    assert.equal(value.inlineInstallSupported, manifest.dshComputerUseManager.inlineInstallVersions.includes(version));
     assert.deepEqual(value.packages.map(pkg => pkg.name), components.map(suffix => host + suffix));
     assert.ok(value.packages.every(pkg => pkg.compatible && pkg.version === version));
     console.log(JSON.stringify({ version, manager: manifest.version, integrity, status: value.status, inlineInstallSupported: value.inlineInstallSupported }));

@@ -202,6 +202,7 @@ window.__ModuleLoader__.load({
       const [state, setState] = React.useState(null);
       const [error, setError] = React.useState('');
       const [fetching, setFetching] = React.useState(false);
+      const [acting, setActing] = React.useState(false);
       const [confirmation, setConfirmation] = React.useState(null);
       const confirmationOpen = React.useRef(false);
       confirmationOpen.current = !!confirmation;
@@ -213,10 +214,19 @@ window.__ModuleLoader__.load({
       const showTime = value => formatTime(value, language) || t('never');
       const visible = () => document.visibilityState === 'visible' && !!root.current?.getClientRects().length;
       const request = React.useCallback(async (action, args = {}) => {
-        if (!alive.current || activeRequest.current) return;
+        if (!alive.current) return;
+        const current = activeRequest.current;
+        if (current) {
+          // A user action supersedes a background read instead of being dropped silently;
+          // only a second action is refused while the first is still in flight.
+          if (!action || current.action) return;
+          current.controller.abort();
+        }
         const controller = new AbortController();
-        activeRequest.current = controller;
+        const entry = { controller, action: action || null };
+        activeRequest.current = entry;
         setFetching(true);
+        if (action) setActing(true);
         const timeout = setTimeout(() => controller.abort(), 20000);
         try {
           const response = await fetch(new URL('api/computer-use-manager', document.baseURI), {
@@ -225,17 +235,20 @@ window.__ModuleLoader__.load({
           });
           const payload = await response.json();
           if (!response.ok || !payload.ok || !payload.value || typeof payload.value !== 'object') throw new Error(payload.error || 'HTTP ' + response.status);
-          if (alive.current) {
+          if (alive.current && activeRequest.current === entry) {
             if (action === 'activate' && payload.value.operation?.kind === 'activate') activationAttempt.current = payload.value.operation.id;
             setState(payload.value);
             setError('');
           }
         } catch (failure) {
-          if (alive.current) setError(failure.name === 'AbortError' ? 'HTTP timeout' : String(failure.message || failure));
+          // A superseded read is not an error; only the request still in charge reports one.
+          if (alive.current && activeRequest.current === entry) setError(failure.name === 'AbortError' ? 'HTTP timeout' : String(failure.message || failure));
         } finally {
           clearTimeout(timeout);
-          if (activeRequest.current === controller) activeRequest.current = null;
-          if (alive.current) setFetching(false);
+          if (activeRequest.current === entry) {
+            activeRequest.current = null;
+            if (alive.current) { setFetching(false); setActing(false); }
+          }
         }
       }, []);
       React.useEffect(() => {
@@ -250,7 +263,7 @@ window.__ModuleLoader__.load({
           clearInterval(interval);
           document.removeEventListener('visibilitychange', refresh);
           window.removeEventListener('focus', refresh);
-          activeRequest.current?.abort();
+          activeRequest.current?.controller.abort();
           activationAttempt.current = null;
         };
       }, [request]);
@@ -272,7 +285,7 @@ window.__ModuleLoader__.load({
       }, [state]);
       const configuredEnabled = state?.configurationKnown === false ? null : state?.configuredEnabled;
       const operationRunning = state?.operation?.status === 'running';
-      const locked = fetching || operationRunning || !state || !!error;
+      const locked = acting || operationRunning || !state || !!error;
       const actionLabel = kind => t(({ activate: 'activate', setEnabled: 'setEnabled', checkUpdates: 'checkUpdatesAction', update: 'updateAction', health: 'healthAction' })[kind] || 'unknown');
       const operationLabel = status => t(({ running: 'operationRunning', failed: 'operationFailed', 'restart-required': 'restartRequired', 'needs-confirmation': 'needsConfirmation', warning: 'warning' })[status] || status || 'unknown');
       const healthLabel = status => t(({ failed: 'healthFailed', unavailable: 'healthUnavailable' })[status] || status || 'unknown');
