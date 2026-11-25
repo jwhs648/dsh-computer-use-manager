@@ -1,143 +1,117 @@
 # DSH 电脑操作能力激活与管理
 
-**为 DSH 原有的 computer-use（电脑操作）能力提供可视化激活与管理入口。**
+为 DSH 自带的 computer-use（电脑操作）能力提供开关、组件检查和自检的管理页面。
 
-本插件不提供独立的电脑操作引擎，也不是为 DSH 另外实现一套 computer-use。它负责启用或停用 DSH 已有的能力、检查官方组件、查看运行状态和执行健康自检；实际桌面操作由 DSH 的官方 computer-use 组件及其 Cua Driver Native 提供方完成。
+[![最新预发行版](https://img.shields.io/github/v/release/jwhs648/dsh-computer-use-manager?include_prereleases&label=release)](https://github.com/jwhs648/dsh-computer-use-manager/releases)
+[![Tests](https://github.com/jwhs648/dsh-computer-use-manager/actions/workflows/tests.yml/badge.svg)](https://github.com/jwhs648/dsh-computer-use-manager/actions/workflows/tests.yml)
+[![Host compatibility](https://github.com/jwhs648/dsh-computer-use-manager/actions/workflows/hosts.yml/badge.svg)](https://github.com/jwhs648/dsh-computer-use-manager/actions/workflows/hosts.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
+![DSH >=0.2.2-rc.3 <0.3.0](https://img.shields.io/badge/DSH-%3E%3D0.2.2--rc.3%20%3C0.3.0-informational)
 
-“DSH 原有能力”不等于每个安装都已预装全部可选组件。若当前安装缺少组件，管理页会列出需要补齐的官方包。已核验安装流程的宿主支持确认后一键补装。
+本插件**不带**独立的电脑操作引擎。桌面操作由 DSH 官方 computer-use 组件和 Cua Driver Native 完成，本插件负责把它们检查齐、打开，并显示运行状态。社区插件，非 DeepSeek 或 Cua 官方发行。
 
-A community activation and management UI for DSH's existing computer-use capability, not a separate computer-control engine. 非 DeepSeek 或 Cua 官方发行组件。
+![电脑操作能力管理页：运行中，56 个原生工具，三个官方组件兼容，自检正常](docs/images/manager.png)
 
-当前预发行版为 **0.2.0-beta.2**，适配 Windows x64 上的 DSH `>=0.2.2-rc.3 <0.3.0-0`。从 [GitHub Release](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.2.0-beta.2) 下载[插件安装包](https://github.com/jwhs648/dsh-computer-use-manager/releases/download/v0.2.0-beta.2/local-dsh-computer-use-manager-0.2.0-beta.2.tgz)和 SHA-256 校验文件。
+## 快速开始
 
-上次发布版本：[`0.2.0-beta.1`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.2.0-beta.1)，声明范围为 DSH `>=0.2.2-rc.3 <0.2.2`。DSH 升级到 `0.2.2` 正式版后 beta.1 不再加载，请换用 beta.2。
+1. 从 [最新 Release](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.2.0-beta.2) 下载 [`local-dsh-computer-use-manager-0.2.0-beta.2.tgz`](https://github.com/jwhs648/dsh-computer-use-manager/releases/download/v0.2.0-beta.2/local-dsh-computer-use-manager-0.2.0-beta.2.tgz)，可用同页的 `SHA256SUMS.txt` 核对。
+2. 在 DSH Desktop 打开 **插件 → 添加插件**，填入安装包在 DSH 所在机器上的绝对路径（不加引号），安装并启用。
+3. 打开侧栏的 **电脑操作能力**，打开开关。组件缺失时按页面提示补齐，启用后查看自检结果。
 
-> 更早的 alpha 版本各自只适配一个宿主版本：[`alpha.4`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.4) 对应 `0.2.2-rc.3`，[`alpha.3`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.3) 对应 `rc.2`，[`alpha.2`](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.2) 对应 `rc.1`。`0.1.0-alpha.1` 存在热重载等待、取消恢复和遗留安装进程处理缺陷，不建议继续分发。
-
-[更新记录](CHANGELOG.md) · [开发者说明](docs/DEVELOPMENT.md) · [问题反馈](https://github.com/jwhs648/dsh-computer-use-manager/issues)
-
-## 开启前后有什么区别
-
-**变化的是 AI 可调用的工具，不是模型本身。** 未开启时，DSH 仍可使用已配置的代码、文件、终端和其他工具；开启并确认原生提供方运行后，AI 才能通过这套 computer-use 工具观察和操作 DSH 所在电脑的界面。
-
-下表假设没有通过其他插件或提供方启用同类电脑操作工具；“未开启”不代表 DSH 的其他自动化方式全部失效。若你已通过官方配置或其他入口启用同一能力，本插件只是增加可视化管理页，不会再叠加一套桌面工具。
-
-| 场景 | 未开启这套 computer-use | 开启且提供方已就绪后 |
-| --- | --- | --- |
-| 代码、文件、终端及其他既有工具 | 按原有配置可用 | 保持原有能力，不由本插件新增 |
-| 看应用界面 | 无法通过这套工具读取窗口状态或截图；可由你提供截图 | 枚举应用和窗口，读取可访问性控件树，按需获取窗口或桌面截图 |
-| 操作应用 | 无法通过这套工具点击或输入；仍可能通过终端等其他途径自动化 | 点击、双击、滚动、拖动，输入文字，发送按键及快捷键 |
-| 管理应用与窗口 | 无此原生工具入口 | 启动指定应用、查看窗口并调整窗口位置和大小 |
-| 操作浏览器页面 | 仍可使用已有网页搜索、抓取或其他浏览器工具（若已配置） | 在受支持且完成授权的浏览器连接中读取页面、点击、填表，并按权限处理文件上传和下载 |
-| 使用剪贴板 | 无这套工具的剪贴板入口 | 按任务读取或写入剪贴板中的文本，以及工具支持的图像或文件引用 |
-
-这些都是 **DSH 官方组件及其原生驱动提供的工具**，不是本插件自行实现的能力。在 Windows x64 + DSH `0.2.2-rc.5` 上，beta.2 启用后显示 **56 个原生工具**；实际数量以管理页运行状态为准，数量随宿主版本、提供方和注册状态变化，不承诺所有环境都有相同数量。
-
-### 可以提出哪些请求
-
-以下是开启后的典型请求示例，不代表所有应用和页面都已逐项实测：
-
-- **查看应用状态**：“找到我指定的应用窗口，读取当前界面；如果有报错，截图并帮我分析。”
-- **操作图形界面**：“打开指定应用，进入设置，查看当前选项；修改前先告诉我准备改什么。”
-- **协助填写网页**：“在我指定且已授权的浏览器页面填写这些内容，提交前停下来让我确认。”
-- **完成后核对**：“按要求点击和输入后，再读取界面，确认操作是否真正生效。”
-
-目标应用、系统权限、页面控件和浏览器连接都可能限制操作。桌面工具作用于 **运行 DSH 的电脑**，不是默认控制打开远程 DSH 网页的另一台电脑。开启不等于自动操作桌面，不等于绕过登录、验证码、系统权限或 DSH 审批，也不保证每个窗口都能在后台操作。
-
-## 这个插件本身做什么
-
-插件提供的是下面这些管理入口，把 DSH 原有能力的启用过程集中到一个页面：
-
-| 入口 | 行为 |
-| --- | --- |
-| 启用开关 | 在本地检查组件，就绪后启用并自检；缺包时给出补齐方式 |
-| 运行状态 | 区分保存的配置、实际工具提供方、可用工具和需要重启的状态 |
-| 检查兼容组件 | 查询与当前 DSH 精确匹配的官方组件，不是最新版检测 |
-| 安装匹配版本 | 只安装固定的三个组件，不接受任意包名或版本 |
-| 健康自检 | 读取原生驱动诊断，展示检查项和清洗后的修复提示，不发送桌面操作或截图 |
-
-界面支持中文、英文和窄屏布局。管理页面独立于可选驱动，停用电脑操作能力后仍可访问。插件自检只读驱动诊断，不会主动截图或发送鼠标键盘操作；上表的桌面行为由 AI 在后续任务中按授权调用原生工具完成。
-
-![管理页面历史截图，来自 alpha.1](docs/images/manager.png)
-
-## 安装
-
-### DSH 插件页面
-
-1. 在 DSH Desktop 打开 **插件 → 添加插件**。
-2. 将下载的插件安装包在 **DSH 所在机器** 上的绝对路径填入 **包名或地址**，不要添加引号。
-3. 阅读第三方插件信任提示并安装，然后启用管理插件。
-4. 进入侧栏的 **电脑操作能力**，按需要打开开关；组件缺失时，按管理页的提示补齐，再启用并查看自检结果。
-
-上一版 beta.1 安装包：[`local-dsh-computer-use-manager-0.2.0-beta.1.tgz`](https://github.com/jwhs648/dsh-computer-use-manager/releases/download/v0.2.0-beta.1/local-dsh-computer-use-manager-0.2.0-beta.1.tgz)。每个版本的 Release 页都提供 SHA-256 校验文件，安装前请核对版本和校验和。旧版发行包的兼容范围不同，见[更新记录](CHANGELOG.md)。
-
-已装旧版时，直接安装新版安装包即可升级同名插件。
-
-也可以用命令行安装。使用 Desktop 安装的 `dsh` 命令；为确保变更完整应用，先退出 DSH，执行后再打开：
+已装旧版时直接安装新包即可升级。也可以退出 DSH 后用命令行安装：
 
 ```powershell
 dsh plugin --profile desktop add "C:\path\to\local-dsh-computer-use-manager-0.2.0-beta.2.tgz"
 ```
 
-远程浏览器电脑上的文件路径不能直接用于 DSH 主机。首次选择本插件不会自动开启电脑操作驱动，两个可选底层组件默认关闭。替换已安装的 Host 代码可能需要重启；刷新页面本身不能替代宿主重启。
+> 首次安装不会自动开启电脑操作，两个底层组件默认关闭。远程浏览器那台电脑上的路径不能直接用于 DSH 主机。
 
-## 开启流程
+## 开启前后有什么区别
 
-```text
-点击开关 → 本地检查 → 组件齐全 → 启用并确认驱动就绪 → 自检
-                     ↳ 缺包 → 按提示补齐 → 重新检测
-```
+变化的是 AI 能调用的工具，不是模型本身。代码、文件、终端等原有工具不受影响。
 
-- 本地组件已兼容时，跳过联网查询与下载。
-- DSH `0.2.2-rc.3` 上缺包时，可查询匹配版本并确认补装。确认五分钟有效，可使用一次。在其他受支持宿主上，页面列出缺失或版本不符的组件，并给出当前版本的 `dsh plugin` 命令。退出 DSH 后在对应配置下执行，重新打开管理页并检测。若异常来自 Desktop 自带的组件，请更新或修复 Desktop。
-- 安装、启动、需要重启和自检异常分别报告，不会一律显示为成功。
-- 组件或当前 DSH 版本、兼容条件改变时，旧组件检查结果会失效；需要重新检查后再安装匹配版本。宿主升级到 rc.3 后，原 rc.2 官方组件也需在管理页检查并更新为 rc.3。
-- 已确认的 HMR 等待条件消除后，会清除相应重启提示；仅观察到运行正常，不会抹掉未知的重启或修复原因。
-- 取消或失败恢复不得把能力从关闭重新开启。已观察到的其他配置变化应保留；没有跨客户端原子事务或同值变更检测保证。
-- 关闭管理页面不会取消已确认的 Host 操作；卸载插件则停止接收请求并取消其拥有的工作，不等待可能反向依赖卸载的 HMR 队列。已经交给官方管理器、无法取消的写入可能在卸载后完成，该实例不会继续排入新的变更。
+| 场景 | 未开启 | 开启且驱动就绪后 |
+| --- | --- | --- |
+| 看应用界面 | 只能靠你提供截图 | 枚举应用和窗口，读取控件树，按需截图 |
+| 操作应用 | 无法点击或输入（仍可用终端等方式） | 点击、双击、滚动、拖动、输入文字、按键和快捷键 |
+| 管理应用与窗口 | 无 | 启动应用、调整窗口位置和大小 |
+| 操作浏览器页面 | 只有已配置的搜索、抓取工具 | 在已授权的浏览器连接中读页面、点击、填表、上传下载 |
+| 剪贴板 | 无 | 读写文本，以及支持的图像或文件引用 |
 
-## 安全与恢复边界
+在 Windows x64 + DSH `0.2.2-rc.5` 上启用后显示 **56 个原生工具**，实际数量以管理页为准，会随宿主版本变化。
 
-- 安装、启用和停用影响当前 DSH 配置下的所有会话。操作前请确认没有其他会话依赖该能力。
-- 不自动授予系统权限、不绕过 DSH 审批、不自动重启 DSH；管理页自检不会操作桌面。
-- 匹配组件安装始终针对当前宿主精确版本，禁用生命周期脚本的配置同时覆盖底层安装器的内部恢复命令。
-- 持有配置写锁后，发现遗留安装运行记录就停止，不判断 PID、不删除记录，也不先备份或恢复配置。请通过 DSH 官方插件管理流程确认旧安装已结束并处理遗留状态。
-- 对不能确认已完成并拥有恢复权的失败，不盲目写回旧配置；会明确报告需要官方修复或重启，而不是声称恢复成功。
-- 普通重启保留配置；完整 Desktop 恢复可能取消自定义 bundle 的选择，此时需在插件页重新启用管理插件。
+可以这样提要求：
 
-## 兼容性与验证
+- “找到某某应用的窗口，读取当前界面；有报错就截图帮我分析。”
+- “打开某某应用的设置，看看当前选项，改之前先告诉我。”
+- “在我已授权的浏览器页面填写这些内容，提交前停下让我确认。”
 
-| 项目 | 范围 |
+桌面工具操作的是**运行 DSH 的那台电脑**。开启不等于绕过登录、验证码、系统权限或 DSH 审批。
+
+## 插件本身做什么
+
+| 入口 | 行为 |
 | --- | --- |
-| 管理页声明范围 | Windows x64，DSH `>=0.2.2-rc.3 <0.3.0-0`；CI 只针对最新 RC 做发布前验证，最新 alpha 仅作预警 |
-| 管理页内补装 | `package.json` 中 `dshComputerUseManager.inlineInstallVersions` 列出的版本（当前 `0.2.2-rc.3`）；其他版本显示手动安装命令 |
-| 原生驱动 | Cua Driver Native，组件版本与 DSH 匹配 |
-| 跨版本验证 | 同一安装包配合 `rc.3`、`rc.4`、`rc.5` 的官方宿主包，检查加载、状态接口、组件识别和补装权限；驱动运行状态由隔离环境提供。`check-hosts` 另在 `0.2.3-alpha.2` 宿主包上通过 |
-| 本机实装 | DSH Desktop `0.2.2-rc.5` 上从旧版直接升级到 beta.2，热加载生效，无需重启，状态显示 56 个工具 |
-| 后台回归 | 包括串行 HMR 队列、取消与新停用交错、遗留安装记录、安装所有权边界 |
-| 浏览器回归 | 真实插件自有控件；后台使用隔离适配器，不能代替实机集成 |
-| 尚未实测 | 第二台机器首装；真实的 `0.2.2` 正式版和 `0.2.3` 宿主；macOS、Linux |
+| 启用开关 | 本地检查组件，就绪后启用并自检；缺包时给出补齐方式 |
+| 运行状态 | 区分保存的配置、实际提供方、可用工具数和是否需要重启 |
+| 检查兼容组件 | 查询与当前 DSH 精确匹配的官方组件（不是追最新版） |
+| 安装匹配版本 | 只安装固定的三个官方组件，不接受任意包名或版本 |
+| 健康自检 | 只读取驱动诊断，不截图、不操作桌面 |
 
-实际测试数量和部署状态以本轮验证记录、运行输出和发布说明为准。模拟浏览器通过不代表当前 DSH 页面或另一台电脑已经通过验收。
+界面支持中文、英文和窄屏。停用电脑操作后管理页仍可访问。
+
+## 兼容性
+
+| 项目 | 说明 |
+| --- | --- |
+| 声明范围 | Windows x64，DSH `>=0.2.2-rc.3 <0.3.0-0` |
+| 页面内一键补装 | 仅 `0.2.2-rc.3`；其他版本显示对应的 `dsh plugin` 命令 |
+| 已验证 | `rc.3`、`rc.4`、`rc.5` 宿主包；`check-hosts` 另在 `0.2.3-alpha.2` 上通过；本机 DSH Desktop `0.2.2-rc.5` 实装 |
+| CI | 每次推送和每周一针对 npm 上最新 RC 验证加载，最新 alpha 作预警 |
+| 尚未实测 | 第二台机器首装；真实的 `0.2.2` 正式版和 `0.2.3`；macOS、Linux |
+
+## 安全边界
+
+- 开关写入配置，影响当前 DSH 配置下的**所有会话**。
+- 不自动授予系统权限，不绕过 DSH 审批，不自动重启 DSH。
+- 组件安装锁定当前宿主的精确版本，并禁用安装脚本。
+- 发现未结束的官方安装操作时直接停止，不猜测、不覆盖。
+- 失败时只撤销本次操作自己做的改动；无法确认时如实报告需要修复或重启，不假装恢复成功。
+
+安装、取消、HMR 和恢复的详细行为见 [开发者说明](docs/DEVELOPMENT.md)。
 
 ## 更新与卸载
 
-本插件是本地或 tarball 来源，不通过内置 Versions 页面自动升级。“检查兼容组件”只管理三个官方组件，不更新本管理插件。
+本插件来自本地 tarball，不会通过 DSH 的 Versions 页面自动升级；“检查兼容组件”只管三个官方组件，不更新本插件。
 
-在插件页卸载管理插件不会自动删除之前单独安装的电脑操作组件。先关闭电脑操作能力，再卸载管理插件，可以更清楚地核对停用结果。
+卸载管理插件不会删除单独安装的电脑操作组件。建议先关闭电脑操作能力，再卸载。
+
+## 版本历史
+
+| 版本 | 支持的 DSH | 状态 |
+| --- | --- | --- |
+| [0.2.0-beta.2](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.2.0-beta.2) | `>=0.2.2-rc.3 <0.3.0-0` | 当前预发行版 |
+| [0.2.0-beta.1](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.2.0-beta.1) | `>=0.2.2-rc.3 <0.2.2` | DSH `0.2.2` 正式版上不再加载，请升级 |
+| [0.1.0-alpha.4](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.4) | `0.2.2-rc.3` | 旧版 |
+| [0.1.0-alpha.3](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.3) | `0.2.2-rc.2` | 旧版 |
+| [0.1.0-alpha.2](https://github.com/jwhs648/dsh-computer-use-manager/releases/tag/v0.1.0-alpha.2) | `0.2.2-rc.1` | 旧版 |
+| 0.1.0-alpha.1 | — | 有已知缺陷，不建议使用 |
+
+完整变更见 [CHANGELOG](CHANGELOG.md)。
 
 ## 开发与反馈
 
-从源码仓库运行，不要在精简发行包中执行测试：
+在源码仓库运行测试（不要在精简发行包里运行）：
 
 ```powershell
 node --test core.test.js api.test.js package.test.js
 ```
 
-浏览器回归入口位于 `verification/run-ui.mjs`，需要相应开发依赖和 Windows Edge。测试可能生成忽略提交的浏览器构建产物和截图；它不会连接真实组件安装或桌面控制接口。
+浏览器回归入口是 `verification/run-ui.mjs`，需要开发依赖和 Windows Edge，详见 [开发者说明](docs/DEVELOPMENT.md)。
 
-反馈时提供 DSH 版本、操作系统、安装方式和已脱敏错误；不要上传密钥、完整配置、会话内容或未裁剪的桌面截图。
+[提交问题](https://github.com/jwhs648/dsh-computer-use-manager/issues)时请附上 DSH 版本、操作系统、安装方式和脱敏后的错误；不要上传密钥、完整配置、会话内容或未裁剪的桌面截图。
 
 ## 许可证
 
-原创代码和插件图标采用 [MIT License](LICENSE)。内嵌控件图标的 Lucide / Feather 归属见 [第三方声明](THIRD_PARTY_NOTICES.md)。DSH、Cua Driver 和其他组件保留各自许可证。
+原创代码和插件图标采用 [MIT License](LICENSE)。内嵌控件图标的 Lucide / Feather 归属见 [第三方声明](THIRD_PARTY_NOTICES.md)。DSH、Cua Driver 等组件保留各自的许可证。
