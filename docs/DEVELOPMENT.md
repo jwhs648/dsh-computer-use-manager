@@ -110,7 +110,8 @@ boundaries, cancellation after an external disable, configuration changes during
 installation, production admission/runner contracts and uncertain recovery
 writers. API tests cover argument restrictions, authentication-adjacent CSRF
 checks, cache policy and diagnostic redaction. Package tests cover display
-resources, bounded prerelease range, default-disabled component rows and client imports.
+resources, the bounded host range (`<0.3.0-0`), version consistency, default-disabled
+component rows and client imports.
 
 The existing browser runner renders the real client and calls the real manager
 and endpoint handler through an in-memory bridge. Installation, registry,
